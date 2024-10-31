@@ -20,7 +20,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # Set SWIG flags for Go
-list(APPEND CMAKE_SWIG_FLAGS "-c++" "-go" "-cgo" "-intgosize" "64")
+list(APPEND CMAKE_SWIG_FLAGS "-c++" "-cgo" "-intgosize" "64")
 
 # Find go cli
 find_program(GO_EXECUTABLE NAMES go)

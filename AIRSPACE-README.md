@@ -30,8 +30,8 @@ It has Go bindings and binaries for use with Go projects.
      `xcode-select --install`
   1. Install C++ tools:
      `brew install cmake wget pkg-config`
-  1. Install SWIG 4.1.1:
-     `brew install swig@4.1.1`
+  1. Install SWIG 4.3.0:
+     `brew install swig@4.3.0`
   1. Install protobuf for Go:
      `$ go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33`
   1. Clone Airspace OR-tools:
