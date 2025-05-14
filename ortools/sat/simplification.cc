@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <deque>
 #include <limits>
-#include <memory>
 #include <utility>
 #include <vector>
 
@@ -33,10 +32,7 @@
 #include "ortools/base/timer.h"
 #include "ortools/graph/strongly_connected_components.h"
 #include "ortools/sat/drat_proof_handler.h"
-#include "ortools/sat/model.h"
-#include "ortools/sat/probing.h"
 #include "ortools/sat/sat_base.h"
-#include "ortools/sat/sat_inprocessing.h"
 #include "ortools/sat/sat_parameters.pb.h"
 #include "ortools/sat/sat_solver.h"
 #include "ortools/util/logging.h"
@@ -71,8 +67,9 @@ void SatPostsolver::FixVariable(Literal x) {
 }
 
 void SatPostsolver::ApplyMapping(
-    const absl::StrongVector<BooleanVariable, BooleanVariable>& mapping) {
-  absl::StrongVector<BooleanVariable, BooleanVariable> new_mapping;
+    const util_intops::StrongVector<BooleanVariable, BooleanVariable>&
+        mapping) {
+  util_intops::StrongVector<BooleanVariable, BooleanVariable> new_mapping;
   if (reverse_mapping_.size() < mapping.size()) {
     // We have new variables.
     while (reverse_mapping_.size() < mapping.size()) {
@@ -253,9 +250,9 @@ void SatPresolver::AddClauseInternal(std::vector<Literal>* clause) {
   DCHECK_EQ(signatures_.size(), clauses_.size());
 }
 
-absl::StrongVector<BooleanVariable, BooleanVariable>
+util_intops::StrongVector<BooleanVariable, BooleanVariable>
 SatPresolver::VariableMapping() const {
-  absl::StrongVector<BooleanVariable, BooleanVariable> result;
+  util_intops::StrongVector<BooleanVariable, BooleanVariable> result;
   BooleanVariable new_var(0);
   for (BooleanVariable var(0); var < NumVariables(); ++var) {
     if (literal_to_clause_sizes_[Literal(var, true)] > 0 ||
@@ -279,7 +276,7 @@ void SatPresolver::LoadProblemIntoSatSolver(SatSolver* solver) {
   literal_to_clauses_.clear();
   signatures_.clear();
 
-  const absl::StrongVector<BooleanVariable, BooleanVariable> mapping =
+  const util_intops::StrongVector<BooleanVariable, BooleanVariable> mapping =
       VariableMapping();
   int new_size = 0;
   for (BooleanVariable index : mapping) {
@@ -1144,7 +1141,7 @@ class PropagationGraph {
 void ProbeAndFindEquivalentLiteral(
     SatSolver* solver, SatPostsolver* postsolver,
     DratProofHandler* drat_proof_handler,
-    absl::StrongVector<LiteralIndex, LiteralIndex>* mapping,
+    util_intops::StrongVector<LiteralIndex, LiteralIndex>* mapping,
     SolverLogger* logger) {
   WallTimer timer;
   timer.Start();

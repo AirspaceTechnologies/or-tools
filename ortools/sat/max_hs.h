@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -28,7 +28,7 @@
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_mapping.h"
 #include "ortools/sat/integer.h"
-#include "ortools/sat/integer_search.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/linear_constraint.h"
 #include "ortools/sat/linear_relaxation.h"
 #include "ortools/sat/model.h"
@@ -95,7 +95,7 @@ class HittingSetOptimizer {
   bool ComputeInitialMpModel();
 
   // Project the at_most_one constraint on the set of extracted variables.
-  void ProjectAndAddAtMostOne(const std::vector<Literal>& literals);
+  void ProjectAndAddAtMostOne(absl::Span<const Literal> literals);
 
   // Project the linear constraint on the set of extracted variables. Non
   // extracted variables are used to 'extend' the lower and upper bound of the
@@ -114,7 +114,7 @@ class HittingSetOptimizer {
   void TightenMpModel();
 
   // Processes the cores from the SAT solver and add them to the MPModel.
-  void AddCoresToTheMpModel(const std::vector<std::vector<Literal>>& cores);
+  void AddCoresToTheMpModel(absl::Span<const std::vector<Literal>> cores);
 
   // Builds the assumptions from the current MP solution.
   std::vector<Literal> BuildAssumptions(
@@ -163,7 +163,7 @@ class HittingSetOptimizer {
   // variables.
   // By convention, we always associate the MPVariableProto with both the
   // positive and the negative SAT variable.
-  absl::StrongVector<IntegerVariable, int> sat_var_to_mp_var_;
+  util_intops::StrongVector<IntegerVariable, int> sat_var_to_mp_var_;
 
   // The list of <positive sat var, mp var proto> created during the
   // ExtractVariable() method.

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,15 +14,13 @@
 #ifndef OR_TOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_
 #define OR_TOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_
 
-#include <queue>
+#include <limits>
 #include <vector>
 
 #include "absl/types/span.h"
 #include "ortools/base/adjustable_priority_queue-inl.h"
 #include "ortools/base/adjustable_priority_queue.h"
-#include "ortools/base/types.h"
 #include "ortools/graph/connected_components.h"
-#include "ortools/util/vector_or_function.h"
 
 namespace operations_research {
 

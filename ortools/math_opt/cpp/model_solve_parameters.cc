@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -20,11 +20,15 @@
 #include <utility>
 
 #include "absl/algorithm/container.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "google/protobuf/repeated_field.h"
+#include "ortools/base/protoutil.h"
 #include "ortools/base/status_macros.h"
 #include "ortools/math_opt/cpp/linear_constraint.h"
+#include "ortools/math_opt/cpp/model.h"
 #include "ortools/math_opt/cpp/solution.h"
 #include "ortools/math_opt/cpp/sparse_containers.h"
 #include "ortools/math_opt/cpp/variable_and_expressions.h"
@@ -42,6 +46,8 @@ using ::google::protobuf::RepeatedField;
 ModelSolveParameters ModelSolveParameters::OnlyPrimalVariables() {
   ModelSolveParameters parameters;
   parameters.dual_values_filter = MakeSkipAllFilter<LinearConstraint>();
+  parameters.quadratic_dual_values_filter =
+      MakeSkipAllFilter<QuadraticConstraint>();
   parameters.reduced_costs_filter = MakeSkipAllFilter<Variable>();
   return parameters;
 }
@@ -65,6 +71,9 @@ absl::Status ModelSolveParameters::CheckModelStorage(
       << "invalid variable_values_filter";
   RETURN_IF_ERROR(dual_values_filter.CheckModelStorage(expected_storage))
       << "invalid dual_values_filter";
+  RETURN_IF_ERROR(
+      quadratic_dual_values_filter.CheckModelStorage(expected_storage))
+      << "invalid quadratic_dual_values_filter";
   RETURN_IF_ERROR(reduced_costs_filter.CheckModelStorage(expected_storage))
       << "invalid reduced_costs_filter";
   for (const auto [var, unused] : branching_priorities) {
@@ -131,8 +140,8 @@ ModelSolveParameters::SolutionHint::FromProto(
   };
 }
 
-ObjectiveParametersProto ModelSolveParameters::ObjectiveParameters::Proto()
-    const {
+absl::StatusOr<ObjectiveParametersProto>
+ModelSolveParameters::ObjectiveParameters::Proto() const {
   ObjectiveParametersProto params;
   if (objective_degradation_absolute_tolerance) {
     params.set_objective_degradation_absolute_tolerance(
@@ -142,10 +151,14 @@ ObjectiveParametersProto ModelSolveParameters::ObjectiveParameters::Proto()
     params.set_objective_degradation_relative_tolerance(
         *objective_degradation_relative_tolerance);
   }
+  if (time_limit < absl::InfiniteDuration()) {
+    RETURN_IF_ERROR(util_time::EncodeGoogleApiProto(
+        time_limit, params.mutable_time_limit()));
+  }
   return params;
 }
 
-ModelSolveParameters::ObjectiveParameters
+absl::StatusOr<ModelSolveParameters::ObjectiveParameters>
 ModelSolveParameters::ObjectiveParameters::FromProto(
     const ObjectiveParametersProto& proto) {
   ObjectiveParameters result;
@@ -157,14 +170,23 @@ ModelSolveParameters::ObjectiveParameters::FromProto(
     result.objective_degradation_relative_tolerance =
         proto.objective_degradation_relative_tolerance();
   }
+  if (proto.has_time_limit()) {
+    OR_ASSIGN_OR_RETURN3(result.time_limit,
+                         util_time::DecodeGoogleApiProto(proto.time_limit()),
+                         _ << "invalid time_limit");
+  } else {
+    result.time_limit = absl::InfiniteDuration();
+  }
   return result;
 }
 
 // TODO: b/315974557 - Return an error if a RepeatedField is too long.
-ModelSolveParametersProto ModelSolveParameters::Proto() const {
+absl::StatusOr<ModelSolveParametersProto> ModelSolveParameters::Proto() const {
   ModelSolveParametersProto ret;
   *ret.mutable_variable_values_filter() = variable_values_filter.Proto();
   *ret.mutable_dual_values_filter() = dual_values_filter.Proto();
+  *ret.mutable_quadratic_dual_values_filter() =
+      quadratic_dual_values_filter.Proto();
   *ret.mutable_reduced_costs_filter() = reduced_costs_filter.Proto();
 
   if (initial_basis.has_value()) {
@@ -187,11 +209,15 @@ ModelSolveParametersProto ModelSolveParameters::Proto() const {
     }
   }
   for (const auto& [objective, params] : objective_parameters) {
-    if (objective.id()) {
-      (*ret.mutable_auxiliary_objective_parameters())[*objective.id()] =
-          params.Proto();
+    if (objective.id().has_value()) {
+      OR_ASSIGN_OR_RETURN3(
+          ((*ret.mutable_auxiliary_objective_parameters())[*objective.id()]),
+          params.Proto(),
+          _ << "invalid parameters for objective " << *objective.id());
     } else {
-      *ret.mutable_primary_objective_parameters() = params.Proto();
+      OR_ASSIGN_OR_RETURN3(*ret.mutable_primary_objective_parameters(),
+                           params.Proto(),
+                           _ << "invalid parameters for primary objective");
     }
   }
   if (!lazy_linear_constraints.empty()) {
@@ -219,6 +245,10 @@ absl::StatusOr<ModelSolveParameters> ModelSolveParameters::FromProto(
       result.dual_values_filter,
       LinearConstraintFilterFromProto(model, proto.dual_values_filter()),
       _ << "invalid dual_values_filter");
+  OR_ASSIGN_OR_RETURN3(result.quadratic_dual_values_filter,
+                       QuadraticConstraintFilterFromProto(
+                           model, proto.quadratic_dual_values_filter()),
+                       _ << "invalid quadratic_dual_values_filter");
   OR_ASSIGN_OR_RETURN3(
       result.reduced_costs_filter,
       VariableFilterFromProto(model, proto.reduced_costs_filter()),
@@ -241,9 +271,13 @@ absl::StatusOr<ModelSolveParameters> ModelSolveParameters::FromProto(
       VariableValuesFromProto(model.storage(), proto.branching_priorities()),
       _ << "invalid branching_priorities");
   if (proto.has_primary_objective_parameters()) {
+    OR_ASSIGN_OR_RETURN3(
+        auto primary_objective_params,
+        ObjectiveParameters::FromProto(proto.primary_objective_parameters()),
+        _ << "invalid primary_objective_parameters");
     result.objective_parameters.try_emplace(
         Objective::Primary(model.storage()),
-        ObjectiveParameters::FromProto(proto.primary_objective_parameters()));
+        std::move(primary_objective_params));
   }
   for (const auto& [id, aux_obj_params_proto] :
        proto.auxiliary_objective_parameters()) {
@@ -252,9 +286,13 @@ absl::StatusOr<ModelSolveParameters> ModelSolveParameters::FromProto(
              << "invalid auxiliary_objective_parameters with id: " << id
              << ", objective not in the model";
     }
+    OR_ASSIGN_OR_RETURN3(
+        auto aux_obj_params,
+        ObjectiveParameters::FromProto(aux_obj_params_proto),
+        _ << "invalid auxiliary_objective_parameters with id: " << id);
     result.objective_parameters.try_emplace(
         Objective::Auxiliary(model.storage(), AuxiliaryObjectiveId{id}),
-        ObjectiveParameters::FromProto(aux_obj_params_proto));
+        std::move(aux_obj_params));
   }
   for (int64_t lin_con : proto.lazy_linear_constraint_ids()) {
     if (!model.has_linear_constraint(lin_con)) {

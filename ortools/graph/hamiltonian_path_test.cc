@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,6 +23,7 @@
 
 #include "absl/random/distributions.h"
 #include "absl/strings/str_format.h"
+#include "absl/types/span.h"
 #include "gtest/gtest.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/macros.h"
@@ -92,7 +93,7 @@ TEST(LatticeMemoryManagerTest, Offset) {
 }
 
 // Displays the path.
-std::string PathToString(const std::vector<int>& path) {
+std::string PathToString(absl::Span<const int> path) {
   std::string path_string;
   const int size = path.size();
   for (int i = 0; i < size; i++) {
@@ -338,8 +339,7 @@ void InitEuclideanCosts(int size, std::vector<double> x, std::vector<double> y,
   }
 }
 
-bool ComparePaths(const std::vector<int>& path1,
-                  const std::vector<int>& path2) {
+bool ComparePaths(absl::Span<const int> path1, absl::Span<const int> path2) {
   // Returns true if TSP paths are equal or one is the reverse of the other.
   // TSP paths always start and end with 0 (the start node). For example, paths
   // (0, 1, 2, 3, 0) and (0, 3, 2, 1, 0) are equivalent, but (0, 1, 2, 3, 0) and

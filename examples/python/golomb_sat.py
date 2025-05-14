@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -38,7 +38,7 @@ _PARAMS = flags.DEFINE_string(
 )
 
 
-def solve_golomb_ruler(order: int, params: str):
+def solve_golomb_ruler(order: int, params: str) -> None:
     """Solve the Golomb ruler problem."""
     # Create the model.
     model = cp_model.CpModel()
@@ -76,18 +76,13 @@ def solve_golomb_ruler(order: int, params: str):
     status = solver.solve(model, solution_printer)
 
     # Print solution.
-    print(f"status: {solver.status_name(status)}")
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         for idx, var in enumerate(marks):
             print(f"mark[{idx}]: {solver.value(var)}")
         intervals = [solver.value(diff) for diff in diffs]
         intervals.sort()
         print(f"intervals: {intervals}")
-
-    print("Statistics:")
-    print(f"- conflicts: {solver.num_conflicts}")
-    print(f"- branches : {solver.num_branches}")
-    print(f"- wall time: {solver.wall_time}s\n")
+    print(solver.response_stats())
 
 
 def main(argv: Sequence[str]) -> None:

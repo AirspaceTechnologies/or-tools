@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -393,12 +393,12 @@ void ObjectiveStorage::Clear(const ObjectiveId id,
     if (!diff.objective_tracked(id)) {
       continue;
     }
-    for (const auto [var, _] : data.linear_terms.terms()) {
+    for (const auto& [var, _] : data.linear_terms.terms()) {
       if (var < diff.variable_checkpoint) {
         diff.objective_diffs[id].linear_coefficients.insert(var);
       }
     }
-    for (const auto [v1, v2, _] : data.quadratic_terms.Terms()) {
+    for (const auto& [v1, v2, _] : data.quadratic_terms.Terms()) {
       if (v2 < diff.variable_checkpoint) {  // v1 <= v2 is implied
         diff.objective_diffs[id].quadratic_coefficients.insert({v1, v2});
       }

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,8 +17,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "ortools/base/types.h"
+#include "absl/types/span.h"
 #include "ortools/sat/cp_model.pb.h"
+#include "ortools/util/logging.h"
+#include "ortools/util/sorted_interval_list.h"
 
 namespace operations_research {
 namespace sat {
@@ -43,8 +45,18 @@ namespace sat {
 // chosen values? The feature might never be needed though.
 void PostsolveResponse(int64_t num_variables_in_original_model,
                        const CpModelProto& mapping_proto,
-                       const std::vector<int>& postsolve_mapping,
+                       absl::Span<const int> postsolve_mapping,
                        std::vector<int64_t>* solution);
+
+// Try to postsolve with a "best-effort" the reduced domain from the presolved
+// model to the user given model. See the documentation of the CpSolverResponse
+// tightened_variables field for more information on the caveats.
+void FillTightenedDomainInResponse(const CpModelProto& original_model,
+                                   const CpModelProto& mapping_proto,
+                                   absl::Span<const int> postsolve_mapping,
+                                   absl::Span<const Domain> search_domains,
+                                   CpSolverResponse* response,
+                                   SolverLogger* logger);
 
 }  // namespace sat
 }  // namespace operations_research

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,25 +17,21 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <limits>
 #include <utility>
 #include <vector>
 
-#include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
 #include "absl/numeric/int128.h"
 #include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/mathutil.h"
-#include "ortools/base/stl_util.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/linear_constraint.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
-#include "ortools/sat/sat_solver.h"
 #include "ortools/sat/util.h"
-#include "ortools/util/sorted_interval_list.h"
 #include "ortools/util/strong_integers.h"
 #include "ortools/util/time_limit.h"
 
@@ -228,6 +224,34 @@ LinearConstraintPropagator<use_int128>::ConditionalLb(
 }
 
 template <bool use_int128>
+void LinearConstraintPropagator<use_int128>::Explain(
+    int /*id*/, IntegerValue propagation_slack, IntegerVariable var_to_explain,
+    int trail_index, std::vector<Literal>* literals_reason,
+    std::vector<int>* trail_indices_reason) {
+  *literals_reason = literal_reason_;
+  trail_indices_reason->clear();
+  shared_->reason_coeffs.clear();
+  for (int i = 0; i < size_; ++i) {
+    const IntegerVariable var = vars_[i];
+    if (PositiveVariable(var) == PositiveVariable(var_to_explain)) {
+      continue;
+    }
+    const int index =
+        shared_->integer_trail->FindTrailIndexOfVarBefore(var, trail_index);
+    if (index >= 0) {
+      trail_indices_reason->push_back(index);
+      if (propagation_slack > 0) {
+        shared_->reason_coeffs.push_back(coeffs_[i]);
+      }
+    }
+  }
+  if (propagation_slack > 0) {
+    shared_->integer_trail->RelaxLinearReason(
+        propagation_slack, shared_->reason_coeffs, trail_indices_reason);
+  }
+}
+
+template <bool use_int128>
 bool LinearConstraintPropagator<use_int128>::Propagate() {
   // Reified case: If any of the enforcement_literals are false, we ignore the
   // constraint.
@@ -353,36 +377,9 @@ bool LinearConstraintPropagator<use_int128>::Propagate() {
       new_ub = lb + div;
       propagation_slack = (div + 1) * coeff - slack - 1;
     }
-    if (!shared_->integer_trail->Enqueue(
-            IntegerLiteral::LowerOrEqual(var, new_ub),
-            /*lazy_reason=*/[this, propagation_slack](
-                                IntegerLiteral i_lit, int trail_index,
-                                std::vector<Literal>* literal_reason,
-                                std::vector<int>* trail_indices_reason) {
-              *literal_reason = literal_reason_;
-              trail_indices_reason->clear();
-              shared_->reason_coeffs.clear();
-              for (int i = 0; i < size_; ++i) {
-                const IntegerVariable var = vars_[i];
-                if (PositiveVariable(var) == PositiveVariable(i_lit.var)) {
-                  continue;
-                }
-                const int index =
-                    shared_->integer_trail->FindTrailIndexOfVarBefore(
-                        var, trail_index);
-                if (index >= 0) {
-                  trail_indices_reason->push_back(index);
-                  if (propagation_slack > 0) {
-                    shared_->reason_coeffs.push_back(coeffs_[i]);
-                  }
-                }
-              }
-              if (propagation_slack > 0) {
-                shared_->integer_trail->RelaxLinearReason(
-                    propagation_slack, shared_->reason_coeffs,
-                    trail_indices_reason);
-              }
-            })) {
+    if (!shared_->integer_trail->EnqueueWithLazyReason(
+            IntegerLiteral::LowerOrEqual(var, new_ub), 0, propagation_slack,
+            this)) {
       // TODO(user): this is never supposed to happen since if we didn't have a
       // conflict above, we should be able to reduce the upper bound. It might
       // indicate an issue with our Boolean <-> integer encoding.
@@ -444,10 +441,11 @@ bool LinearConstraintPropagator<use_int128>::PropagateAtLevelZero() {
     IntegerValue new_ub;
     if (use_int128) {
       const IntegerValue ub = shared_->integer_trail->LevelZeroUpperBound(var);
-      const absl::int128 div128 = slack128 / absl::int128(coeff.value());
-      if (absl::int128(lb.value()) + div128 >= absl::int128(ub.value())) {
+      if (absl::int128((ub - lb).value()) * absl::int128(coeff.value()) <=
+          slack128) {
         continue;
       }
+      const absl::int128 div128 = slack128 / absl::int128(coeff.value());
       new_ub = lb + IntegerValue(static_cast<int64_t>(div128));
     } else {
       const IntegerValue div = slack / coeff;
@@ -552,10 +550,12 @@ bool LevelZeroEquality::Propagate() {
   return true;
 }
 
-MinPropagator::MinPropagator(const std::vector<IntegerVariable>& vars,
-                             IntegerVariable min_var,
+MinPropagator::MinPropagator(std::vector<AffineExpression> vars,
+                             AffineExpression min_var,
                              IntegerTrail* integer_trail)
-    : vars_(vars), min_var_(min_var), integer_trail_(integer_trail) {}
+    : vars_(std::move(vars)),
+      min_var_(min_var),
+      integer_trail_(integer_trail) {}
 
 bool MinPropagator::Propagate() {
   if (vars_.empty()) return true;
@@ -581,11 +581,11 @@ bool MinPropagator::Propagate() {
   // Propagation a)
   if (min > integer_trail_->LowerBound(min_var_)) {
     integer_reason_.clear();
-    for (const IntegerVariable var : vars_) {
-      integer_reason_.push_back(IntegerLiteral::GreaterOrEqual(var, min));
+    for (const AffineExpression& var : vars_) {
+      integer_reason_.push_back(var.GreaterOrEqual(min));
     }
-    if (!integer_trail_->Enqueue(IntegerLiteral::GreaterOrEqual(min_var_, min),
-                                 {}, integer_reason_)) {
+    if (!integer_trail_->SafeEnqueue(min_var_.GreaterOrEqual(min),
+                                     integer_reason_)) {
       return false;
     }
   }
@@ -600,15 +600,13 @@ bool MinPropagator::Propagate() {
       // The reason is that all the other interval start after current_min_ub.
       // And that min_ub has its current value.
       integer_reason_.push_back(min_ub_literal);
-      for (const IntegerVariable var : vars_) {
+      for (const AffineExpression& var : vars_) {
         if (var == vars_[last_possible_min_interval]) continue;
-        integer_reason_.push_back(
-            IntegerLiteral::GreaterOrEqual(var, current_min_ub + 1));
+        integer_reason_.push_back(var.GreaterOrEqual(current_min_ub + 1));
       }
-      if (!integer_trail_->Enqueue(
-              IntegerLiteral::LowerOrEqual(vars_[last_possible_min_interval],
-                                           current_min_ub),
-              {}, integer_reason_)) {
+      if (!integer_trail_->SafeEnqueue(
+              vars_[last_possible_min_interval].LowerOrEqual(current_min_ub),
+              integer_reason_)) {
         return false;
       }
     }
@@ -625,9 +623,11 @@ bool MinPropagator::Propagate() {
 
     // Almost the same as propagation b).
     integer_reason_.push_back(min_ub_literal);
-    for (const IntegerVariable var : vars_) {
-      integer_reason_.push_back(
-          IntegerLiteral::GreaterOrEqual(var, current_min_ub + 1));
+    for (const AffineExpression& var : vars_) {
+      IntegerLiteral lit = var.GreaterOrEqual(current_min_ub + 1);
+      if (lit != IntegerLiteral::TrueLiteral()) {
+        integer_reason_.push_back(lit);
+      }
     }
     return integer_trail_->ReportConflict(integer_reason_);
   }
@@ -637,22 +637,60 @@ bool MinPropagator::Propagate() {
 
 void MinPropagator::RegisterWith(GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
-  for (const IntegerVariable& var : vars_) {
+  for (const AffineExpression& var : vars_) {
     watcher->WatchLowerBound(var, id);
   }
   watcher->WatchUpperBound(min_var_, id);
 }
 
-LinMinPropagator::LinMinPropagator(const std::vector<LinearExpression>& exprs,
+LinMinPropagator::LinMinPropagator(std::vector<LinearExpression> exprs,
                                    IntegerVariable min_var, Model* model)
-    : exprs_(exprs),
+    : exprs_(std::move(exprs)),
       min_var_(min_var),
       model_(model),
       integer_trail_(model_->GetOrCreate<IntegerTrail>()) {}
 
+void LinMinPropagator::Explain(int id, IntegerValue propagation_slack,
+                               IntegerVariable var_to_explain, int trail_index,
+                               std::vector<Literal>* literals_reason,
+                               std::vector<int>* trail_indices_reason) {
+  const auto& vars = exprs_[id].vars;
+  const auto& coeffs = exprs_[id].coeffs;
+  literals_reason->clear();
+  trail_indices_reason->clear();
+  std::vector<IntegerValue> reason_coeffs;
+  const int size = vars.size();
+  for (int i = 0; i < size; ++i) {
+    const IntegerVariable var = vars[i];
+    if (PositiveVariable(var) == PositiveVariable(var_to_explain)) {
+      continue;
+    }
+    const int index =
+        integer_trail_->FindTrailIndexOfVarBefore(var, trail_index);
+    if (index >= 0) {
+      trail_indices_reason->push_back(index);
+      if (propagation_slack > 0) {
+        reason_coeffs.push_back(coeffs[i]);
+      }
+    }
+  }
+  if (propagation_slack > 0) {
+    integer_trail_->RelaxLinearReason(propagation_slack, reason_coeffs,
+                                      trail_indices_reason);
+  }
+  // Now add the old integer_reason that triggered this propagation.
+  for (IntegerLiteral reason_lit : integer_reason_for_unique_candidate_) {
+    const int index =
+        integer_trail_->FindTrailIndexOfVarBefore(reason_lit.var, trail_index);
+    if (index >= 0) {
+      trail_indices_reason->push_back(index);
+    }
+  }
+}
+
 bool LinMinPropagator::PropagateLinearUpperBound(
-    const std::vector<IntegerVariable>& vars,
-    const std::vector<IntegerValue>& coeffs, const IntegerValue upper_bound) {
+    int id, absl::Span<const IntegerVariable> vars,
+    absl::Span<const IntegerValue> coeffs, const IntegerValue upper_bound) {
   IntegerValue sum_lb = IntegerValue(0);
   const int num_vars = vars.size();
   max_variations_.resize(num_vars);
@@ -699,46 +737,10 @@ bool LinMinPropagator::PropagateLinearUpperBound(
     const IntegerValue coeff = coeffs[i];
     const IntegerValue div = slack / coeff;
     const IntegerValue new_ub = integer_trail_->LowerBound(var) + div;
-
     const IntegerValue propagation_slack = (div + 1) * coeff - slack - 1;
-    if (!integer_trail_->Enqueue(
-            IntegerLiteral::LowerOrEqual(var, new_ub),
-            /*lazy_reason=*/[this, &vars, &coeffs, propagation_slack](
-                                IntegerLiteral i_lit, int trail_index,
-                                std::vector<Literal>* literal_reason,
-                                std::vector<int>* trail_indices_reason) {
-              literal_reason->clear();
-              trail_indices_reason->clear();
-              std::vector<IntegerValue> reason_coeffs;
-              const int size = vars.size();
-              for (int i = 0; i < size; ++i) {
-                const IntegerVariable var = vars[i];
-                if (PositiveVariable(var) == PositiveVariable(i_lit.var)) {
-                  continue;
-                }
-                const int index =
-                    integer_trail_->FindTrailIndexOfVarBefore(var, trail_index);
-                if (index >= 0) {
-                  trail_indices_reason->push_back(index);
-                  if (propagation_slack > 0) {
-                    reason_coeffs.push_back(coeffs[i]);
-                  }
-                }
-              }
-              if (propagation_slack > 0) {
-                integer_trail_->RelaxLinearReason(
-                    propagation_slack, reason_coeffs, trail_indices_reason);
-              }
-              // Now add the old integer_reason that triggered this propagation.
-              for (IntegerLiteral reason_lit :
-                   integer_reason_for_unique_candidate_) {
-                const int index = integer_trail_->FindTrailIndexOfVarBefore(
-                    reason_lit.var, trail_index);
-                if (index >= 0) {
-                  trail_indices_reason->push_back(index);
-                }
-              }
-            })) {
+    if (!integer_trail_->EnqueueWithLazyReason(
+            IntegerLiteral::LowerOrEqual(var, new_ub), id, propagation_slack,
+            this)) {
       return false;
     }
   }
@@ -815,7 +817,7 @@ bool LinMinPropagator::Propagate() {
       }
 
       return PropagateLinearUpperBound(
-          exprs_[last_possible_min_interval].vars,
+          last_possible_min_interval, exprs_[last_possible_min_interval].vars,
           exprs_[last_possible_min_interval].coeffs,
           current_min_ub - exprs_[last_possible_min_interval].offset);
     }
@@ -826,6 +828,7 @@ bool LinMinPropagator::Propagate() {
 
 void LinMinPropagator::RegisterWith(GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
+  bool has_var_also_in_exprs = false;
   for (const LinearExpression& expr : exprs_) {
     for (int i = 0; i < expr.vars.size(); ++i) {
       const IntegerVariable& var = expr.vars[i];
@@ -835,10 +838,14 @@ void LinMinPropagator::RegisterWith(GenericLiteralWatcher* watcher) {
       } else {
         watcher->WatchUpperBound(var, id);
       }
+      has_var_also_in_exprs |= (var == min_var_);
     }
   }
   watcher->WatchUpperBound(min_var_, id);
   watcher->RegisterReversibleInt(id, &rev_unique_candidate_);
+  if (has_var_also_in_exprs) {
+    watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
+  }
 }
 
 ProductPropagator::ProductPropagator(AffineExpression a, AffineExpression b,
@@ -1648,45 +1655,6 @@ void FixedModuloPropagator::RegisterWith(GenericLiteralWatcher* watcher) {
   watcher->WatchAffineExpression(expr_, id);
   watcher->WatchAffineExpression(target_, id);
   watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
-}
-
-std::function<void(Model*)> IsOneOf(IntegerVariable var,
-                                    const std::vector<Literal>& selectors,
-                                    const std::vector<IntegerValue>& values) {
-  return [=](Model* model) {
-    IntegerTrail* integer_trail = model->GetOrCreate<IntegerTrail>();
-    IntegerEncoder* encoder = model->GetOrCreate<IntegerEncoder>();
-
-    CHECK(!values.empty());
-    CHECK_EQ(values.size(), selectors.size());
-    std::vector<int64_t> unique_values;
-    absl::flat_hash_map<int64_t, std::vector<Literal>> value_to_selector;
-    for (int i = 0; i < values.size(); ++i) {
-      unique_values.push_back(values[i].value());
-      value_to_selector[values[i].value()].push_back(selectors[i]);
-    }
-    gtl::STLSortAndRemoveDuplicates(&unique_values);
-
-    integer_trail->UpdateInitialDomain(var, Domain::FromValues(unique_values));
-    if (unique_values.size() == 1) {
-      model->Add(ClauseConstraint(selectors));
-      return;
-    }
-
-    // Note that it is more efficient to call AssociateToIntegerEqualValue()
-    // with the values ordered, like we do here.
-    for (const int64_t v : unique_values) {
-      const std::vector<Literal>& selectors = value_to_selector[v];
-      if (selectors.size() == 1) {
-        encoder->AssociateToIntegerEqualValue(selectors[0], var,
-                                              IntegerValue(v));
-      } else {
-        const Literal l(model->Add(NewBooleanVariable()), true);
-        model->Add(ReifiedBoolOr(selectors, l));
-        encoder->AssociateToIntegerEqualValue(l, var, IntegerValue(v));
-      }
-    }
-  };
 }
 
 }  // namespace sat

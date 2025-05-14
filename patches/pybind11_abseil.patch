@@ -55,27 +55,31 @@ index ceb65a8..e142837 100644
  include_directories(${TOP_LEVEL_DIR} ${pybind11_INCLUDE_DIRS})
 diff --git a/cmake/dependencies/CMakeLists.txt b/cmake/dependencies/CMakeLists.txt
 new file mode 100644
-index 0000000..ffe4d38
+index 0000000..cb13e7e
 --- /dev/null
 +++ b/cmake/dependencies/CMakeLists.txt
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,19 @@
 +include(FetchContent)
-+
-+set(ABSL_PROPAGATE_CXX_STD ON)
 +set(BUILD_TESTING OFF)
-+FetchContent_Declare(
-+  abseil-cpp
-+  URL https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.0.tar.gz
-+  URL_HASH
++
++if(NOT TARGET absl::base)
++  set(ABSL_PROPAGATE_CXX_STD ON)
++  FetchContent_Declare(
++    absl
++    URL https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.0.tar.gz
++    URL_HASH
 +    SHA256=59d2976af9d6ecf001a81a35749a6e551a335b949d34918cfade07737b9d93c5)
++  FetchContent_MakeAvailable(absl)
++endif()
 +
-+FetchContent_Declare(
-+  pybind11
-+  URL https://github.com/pybind/pybind11/archive/refs/heads/master.tar.gz)
-+
-+FetchContent_MakeAvailable(abseil-cpp pybind11)
++if(NOT TARGET pybind11::pybind11_headers)
++  FetchContent_Declare(
++    pybind11
++    URL https://github.com/pybind/pybind11/archive/refs/heads/master.tar.gz)
++  FetchContent_MakeAvailable(pybind11)
++endif()
 diff --git a/pybind11_abseil/BUILD b/pybind11_abseil/BUILD
-index 4cff8b7..33e614a 100644
+index 791c245..33e614a 100644
 --- a/pybind11_abseil/BUILD
 +++ b/pybind11_abseil/BUILD
 @@ -25,43 +25,39 @@ pybind_library(
@@ -90,7 +94,7 @@ index 4cff8b7..33e614a 100644
      visibility = ["//visibility:public"],
      deps = [
          "@com_google_absl//absl/status",
--        "@local_config_python//:python_headers",  # buildcleaner: keep
+-        "@rules_python//python/cc:current_py_cc_headers",  # buildcleaner: keep
      ],
  )
  
@@ -101,7 +105,7 @@ index 4cff8b7..33e614a 100644
      visibility = ["//visibility:private"],
      deps = [
          ":ok_status_singleton_lib",
--        "@local_config_python//:python_headers",  # buildcleaner: keep
+-        "@rules_python//python/cc:current_py_cc_headers",  # buildcleaner: keep
      ],
  )
  
@@ -113,7 +117,7 @@ index 4cff8b7..33e614a 100644
 -    linkshared = 1,
      deps = [
          ":ok_status_singleton_pyinit_google3",
--        "@local_config_python//:python_headers",  # buildcleaner: keep
+-        "@rules_python//python/cc:current_py_cc_headers",  # buildcleaner: keep
      ],
  )
  
@@ -149,12 +153,12 @@ index 4cff8b7..33e614a 100644
 -    linkshared = 1,
      deps = [
          ":status_pyinit_google3",
--        "@local_config_python//:python_headers",  # buildcleaner: keep
+-        "@rules_python//python/cc:current_py_cc_headers",  # buildcleaner: keep
      ],
  )
  
 diff --git a/pybind11_abseil/CMakeLists.txt b/pybind11_abseil/CMakeLists.txt
-index d1b7483..ce7fd72 100644
+index d1b7483..74e3443 100644
 --- a/pybind11_abseil/CMakeLists.txt
 +++ b/pybind11_abseil/CMakeLists.txt
 @@ -42,14 +42,19 @@ target_link_libraries(ok_status_singleton_pyinit_google3
@@ -180,7 +184,7 @@ index d1b7483..ce7fd72 100644
  target_link_libraries(ok_status_singleton
                        PUBLIC ok_status_singleton_pyinit_google3)
  
-@@ -150,14 +155,23 @@ target_link_libraries(status_pyinit_google3 PUBLIC register_status_bindings)
+@@ -150,14 +155,30 @@ target_link_libraries(status_pyinit_google3 PUBLIC register_status_bindings)
  
  # status ====================================================================
  
@@ -191,25 +195,32 @@ index d1b7483..ce7fd72 100644
 +set_target_properties(status_py_extension_stub PROPERTIES LIBRARY_OUTPUT_NAME "status")
 +# note: macOS is APPLE and also UNIX !
 +if(APPLE)
-+  set_target_properties(status_py_extension_stub PROPERTIES SUFFIX ".so")
++  set_target_properties(status_py_extension_stub PROPERTIES
++    SUFFIX ".so"
++    INSTALL_RPATH "@loader_path;@loader_path/../ortools/.libs"
++  )
 +  set_property(TARGET status_py_extension_stub APPEND PROPERTY
 +    LINK_FLAGS "-flat_namespace -undefined suppress")
++elseif(UNIX)
++  set_target_properties(status_py_extension_stub PROPERTIES
++    INSTALL_RPATH "$ORIGIN:$ORIGIN/../ortools/.libs"
++    )
 +endif()
-+
-+add_library(pybind11_abseil::status ALIAS status_py_extension_stub)
  
 -target_include_directories(status INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
-+target_include_directories(status_py_extension_stub INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
++add_library(pybind11_abseil::status ALIAS status_py_extension_stub)
  
 -set_target_properties(status PROPERTIES PREFIX "")
-+set_target_properties(status_py_extension_stub PROPERTIES PREFIX "")
++target_include_directories(status_py_extension_stub INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
  
 -target_link_libraries(status PUBLIC status_pyinit_google3 absl::status)
++set_target_properties(status_py_extension_stub PROPERTIES PREFIX "")
++
 +target_link_libraries(status_py_extension_stub PUBLIC status_pyinit_google3 absl::status)
  
  # import_status_module =========================================================
  
-@@ -167,7 +181,7 @@ add_library(pybind11_abseil::import_status_module ALIAS import_status_module)
+@@ -167,7 +188,7 @@ add_library(pybind11_abseil::import_status_module ALIAS import_status_module)
  target_include_directories(import_status_module
                             INTERFACE $<BUILD_INTERFACE:${TOP_LEVEL_DIR}>)
  
@@ -218,7 +229,7 @@ index d1b7483..ce7fd72 100644
  
  # status_casters ===============================================================
  
-@@ -175,25 +189,27 @@ add_library(status_casters INTERFACE)
+@@ -175,25 +196,27 @@ add_library(status_casters INTERFACE)
  add_library(pybind11_abseil::status_casters ALIAS status_casters)
  
  target_include_directories(status_casters

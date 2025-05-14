@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -194,7 +194,7 @@ double GetBestScalingOfDoublesToInt64(absl::Span<const double> input,
   return scaling_factor;
 }
 
-void GetBestScalingOfDoublesToInt64(const std::vector<double>& input,
+void GetBestScalingOfDoublesToInt64(absl::Span<const double> input,
                                     int64_t max_absolute_sum,
                                     double* scaling_factor,
                                     double* max_relative_coeff_error) {

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -182,7 +182,7 @@ class ProblemState {
   // Returns true when the variable var is fixed in the current problem state.
   // The value of the fixed variable is returned by GetVariableFixedValue(var).
   bool IsVariableFixed(VariableIndex var) const { return is_fixed_[var]; }
-  const absl::StrongVector<VariableIndex, bool>& is_fixed() const {
+  const util_intops::StrongVector<VariableIndex, bool>& is_fixed() const {
     return is_fixed_;
   }
 
@@ -191,7 +191,7 @@ class ProblemState {
   bool GetVariableFixedValue(VariableIndex var) const {
     return fixed_values_[var];
   }
-  const absl::StrongVector<VariableIndex, bool>& fixed_values() const {
+  const util_intops::StrongVector<VariableIndex, bool>& fixed_values() const {
     return fixed_values_;
   }
 
@@ -235,8 +235,8 @@ class ProblemState {
   const sat::LinearBooleanProblem& original_problem_;
   BopParameters parameters_;
   int64_t update_stamp_;
-  absl::StrongVector<VariableIndex, bool> is_fixed_;
-  absl::StrongVector<VariableIndex, bool> fixed_values_;
+  util_intops::StrongVector<VariableIndex, bool> is_fixed_;
+  util_intops::StrongVector<VariableIndex, bool> fixed_values_;
   glop::DenseRow lp_values_;
   BopSolution solution_;
   std::vector<bool> assignment_preference_;

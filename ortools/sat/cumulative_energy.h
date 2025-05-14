@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,13 +14,17 @@
 #ifndef OR_TOOLS_SAT_CUMULATIVE_ENERGY_H_
 #define OR_TOOLS_SAT_CUMULATIVE_ENERGY_H_
 
-#include <functional>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
+#include "absl/types/span.h"
+#include "ortools/sat/2d_orthogonal_packing.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/intervals.h"
 #include "ortools/sat/model.h"
+#include "ortools/sat/synchronization.h"
 #include "ortools/sat/theta_tree.h"
 #include "ortools/sat/util.h"
 
@@ -44,6 +48,13 @@ void AddCumulativeOverloadChecker(AffineExpression capacity,
                                   SchedulingConstraintHelper* helper,
                                   SchedulingDemandHelper* demands,
                                   Model* model);
+
+// Same as above, but applying a Dual Feasible Function (also known as a
+// conservative scale) before looking for overload.
+void AddCumulativeOverloadCheckerDff(AffineExpression capacity,
+                                     SchedulingConstraintHelper* helper,
+                                     SchedulingDemandHelper* demands,
+                                     Model* model);
 
 // Implementation of AddCumulativeOverloadChecker().
 class CumulativeEnergyConstraint : public PropagatorInterface {
@@ -82,7 +93,7 @@ class CumulativeIsAfterSubsetConstraint : public PropagatorInterface {
   CumulativeIsAfterSubsetConstraint(IntegerVariable var,
                                     AffineExpression capacity,
                                     const std::vector<int>& subtasks,
-                                    const std::vector<IntegerValue>& offsets,
+                                    absl::Span<const IntegerValue> offsets,
                                     SchedulingConstraintHelper* helper,
                                     SchedulingDemandHelper* demands,
                                     Model* model);
@@ -106,6 +117,44 @@ class CumulativeIsAfterSubsetConstraint : public PropagatorInterface {
   IntegerTrail* integer_trail_;
   SchedulingConstraintHelper* helper_;
   SchedulingDemandHelper* demands_;
+};
+
+// Implementation of AddCumulativeOverloadCheckerDff().
+class CumulativeDualFeasibleEnergyConstraint : public PropagatorInterface {
+ public:
+  CumulativeDualFeasibleEnergyConstraint(AffineExpression capacity,
+                                         SchedulingConstraintHelper* helper,
+                                         SchedulingDemandHelper* demands,
+                                         Model* model);
+
+  ~CumulativeDualFeasibleEnergyConstraint() override;
+
+  bool Propagate() final;
+  void RegisterWith(GenericLiteralWatcher* watcher);
+
+ private:
+  bool FindAndPropagateConflict(IntegerValue window_start,
+                                IntegerValue window_end);
+
+  ModelRandomGenerator* random_;
+  SharedStatistics* shared_stats_;
+  OrthogonalPackingInfeasibilityDetector opp_infeasibility_detector_;
+  const AffineExpression capacity_;
+  IntegerTrail* integer_trail_;
+  SchedulingConstraintHelper* helper_;
+  SchedulingDemandHelper* demands_;
+
+  ThetaLambdaTree<IntegerValue> theta_tree_;
+
+  // Task characteristics.
+  std::vector<int> task_to_start_event_;
+
+  // Start event characteristics, by nondecreasing start time.
+  std::vector<TaskTime> start_event_task_time_;
+
+  int64_t num_calls_ = 0;
+  int64_t num_conflicts_ = 0;
+  int64_t num_no_potential_window_ = 0;
 };
 
 }  // namespace sat

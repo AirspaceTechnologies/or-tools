@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,14 +25,10 @@
 #include <string>
 #include <vector>
 
-#include "absl/memory/memory.h"
 #include "ortools/linear_solver/linear_expr.h"
 #include "ortools/linear_solver/linear_solver.h"
-#include "scip/scip_sol.h"
-#include "scip/type_cons.h"
 #include "scip/type_scip.h"
 #include "scip/type_sol.h"
-#include "scip/type_var.h"
 
 namespace operations_research {
 

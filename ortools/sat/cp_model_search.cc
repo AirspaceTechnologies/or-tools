@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 #include "ortools/sat/cp_model_search.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -21,18 +22,20 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/flags/flag.h"
 #include "absl/log/check.h"
 #include "absl/random/distributions.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_mapping.h"
 #include "ortools/sat/cp_model_utils.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/integer_search.h"
 #include "ortools/sat/linear_propagation.h"
 #include "ortools/sat/model.h"
@@ -41,10 +44,6 @@
 #include "ortools/sat/util.h"
 #include "ortools/util/strong_integers.h"
 
-// TODO(user): remove this when the code is stable and does not use SCIP
-// anymore.
-ABSL_FLAG(bool, cp_model_use_max_hs, false, "Use max_hs in search portfolio.");
-
 namespace operations_research {
 namespace sat {
 
@@ -52,7 +51,8 @@ CpModelView::CpModelView(Model* model)
     : mapping_(*model->GetOrCreate<CpModelMapping>()),
       boolean_assignment_(model->GetOrCreate<Trail>()->Assignment()),
       integer_trail_(*model->GetOrCreate<IntegerTrail>()),
-      integer_encoder_(*model->GetOrCreate<IntegerEncoder>()) {}
+      integer_encoder_(*model->GetOrCreate<IntegerEncoder>()),
+      random_(*model->GetOrCreate<ModelRandomGenerator>()) {}
 
 int CpModelView::NumVariables() const { return mapping_.NumProtoVariables(); }
 
@@ -137,6 +137,28 @@ BooleanOrIntegerLiteral CpModelView::MedianValue(int var) const {
   return result;
 }
 
+BooleanOrIntegerLiteral CpModelView::RandomSplit(int var, int64_t lb,
+                                                 int64_t ub) const {
+  DCHECK(!IsFixed(var));
+  BooleanOrIntegerLiteral result;
+  if (mapping_.IsBoolean(var)) {
+    if (absl::Bernoulli(random_, 0.5)) {
+      result.boolean_literal_index = mapping_.Literal(var).Index();
+    } else {
+      result.boolean_literal_index = mapping_.Literal(var).NegatedIndex();
+    }
+  } else if (mapping_.IsInteger(var)) {
+    if (absl::Bernoulli(random_, 0.5)) {
+      result.integer_literal = IntegerLiteral::LowerOrEqual(
+          mapping_.Integer(var), IntegerValue(lb + (ub - lb) / 2));
+    } else {
+      result.integer_literal = IntegerLiteral::GreaterOrEqual(
+          mapping_.Integer(var), IntegerValue(ub - (ub - lb) / 2));
+    }
+  }
+  return result;
+}
+
 // Stores one variable and its strategy value.
 struct VarValue {
   int ref;
@@ -154,16 +176,18 @@ bool ModelHasSchedulingConstraints(const CpModelProto& cp_model_proto) {
   return false;
 }
 
-void AddDualSchedulingHeuristics(SatParameters& new_params) {
+void AddExtraSchedulingPropagators(SatParameters& new_params) {
   new_params.set_exploit_all_precedences(true);
   new_params.set_use_hard_precedences_in_cumulative(true);
   new_params.set_use_overload_checker_in_cumulative(true);
   new_params.set_use_strong_propagation_in_disjunctive(true);
   new_params.set_use_timetable_edge_finding_in_cumulative(true);
+  new_params.set_use_conservative_scale_overload_checker(true);
   new_params.set_max_pairs_pairwise_reasoning_in_no_overlap_2d(5000);
   new_params.set_use_timetabling_in_no_overlap_2d(true);
   new_params.set_use_energetic_reasoning_in_no_overlap_2d(true);
   new_params.set_use_area_energetic_reasoning_in_no_overlap_2d(true);
+  new_params.set_use_try_edge_reasoning_in_no_overlap_2d(true);
 }
 
 // We want a random tie breaking among variables with equivalent values.
@@ -315,6 +339,8 @@ std::function<BooleanOrIntegerLiteral()> ConstructUserSearchStrategy(
           return view.GreaterOrEqual(var, ub - (ub - lb) / 2);
         case DecisionStrategyProto::SELECT_MEDIAN_VALUE:
           return view.MedianValue(var);
+        case DecisionStrategyProto::SELECT_RANDOM_HALF:
+          return view.RandomSplit(var, lb, ub);
         default:
           LOG(FATAL) << "Unknown DomainReductionStrategy "
                      << strategy.domain_reduction_strategy();
@@ -357,7 +383,7 @@ std::function<BooleanOrIntegerLiteral()> ConstructHeuristicSearchStrategy(
 
 std::function<BooleanOrIntegerLiteral()>
 ConstructIntegerCompletionSearchStrategy(
-    const std::vector<IntegerVariable>& variable_mapping,
+    absl::Span<const IntegerVariable> variable_mapping,
     IntegerVariable objective_var, Model* model) {
   const auto& params = *model->GetOrCreate<SatParameters>();
   if (!params.instantiate_all_variables()) {
@@ -421,8 +447,8 @@ std::function<BooleanOrIntegerLiteral()> ConstructFixedSearchStrategy(
 
 std::function<BooleanOrIntegerLiteral()> InstrumentSearchStrategy(
     const CpModelProto& cp_model_proto,
-    const std::vector<IntegerVariable>& variable_mapping,
-    const std::function<BooleanOrIntegerLiteral()>& instrumented_strategy,
+    absl::Span<const IntegerVariable> variable_mapping,
+    std::function<BooleanOrIntegerLiteral()> instrumented_strategy,
     Model* model) {
   std::vector<int> ref_to_display;
   for (int i = 0; i < cp_model_proto.variables_size(); ++i) {
@@ -436,7 +462,7 @@ std::function<BooleanOrIntegerLiteral()> InstrumentSearchStrategy(
   });
 
   std::vector<std::pair<int64_t, int64_t>> old_domains(variable_mapping.size());
-  return [instrumented_strategy, model, variable_mapping, cp_model_proto,
+  return [instrumented_strategy, model, variable_mapping, &cp_model_proto,
           old_domains, ref_to_display]() mutable {
     const BooleanOrIntegerLiteral decision = instrumented_strategy();
     if (!decision.HasValue()) return decision;
@@ -476,21 +502,14 @@ std::function<BooleanOrIntegerLiteral()> InstrumentSearchStrategy(
   };
 }
 
-// This generates a valid random seed (base_seed + delta) without overflow.
-// We assume |delta| is small.
-int ValidSumSeed(int base_seed, int delta) {
-  CHECK_GE(delta, 0);
-  int64_t result = int64_t{base_seed} + int64_t{delta};
-  const int64_t int32max = int64_t{std::numeric_limits<int>::max()};
-  while (result > int32max) {
-    result -= int32max;
-  }
-  return static_cast<int>(result);
-}
-
 absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
-    const SatParameters& base_params) {
+    SatParameters base_params) {
   absl::flat_hash_map<std::string, SatParameters> strategies;
+
+  // By default we disable the logging when we generate a set of parameter. It
+  // is possible to force it by setting it in the corresponding named parameter
+  // via the subsolver_params field.
+  base_params.set_log_search_progress(false);
 
   // The "default" name can be used for the base_params unchanged.
   strategies["default"] = base_params;
@@ -505,6 +524,8 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
     new_params.set_linearization_level(2);
     new_params.set_add_lp_constraints_lazily(false);
     strategies["max_lp"] = new_params;
+    new_params.set_use_symmetry_in_lp(true);
+    strategies["max_lp_sym"] = new_params;
   }
 
   // Core. Note that we disable the lp here because it is faster on the minizinc
@@ -558,7 +579,7 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
 
     new_params.set_linearization_level(2);
     if (base_params.use_dual_scheduling_heuristics()) {
-      AddDualSchedulingHeuristics(new_params);
+      AddExtraSchedulingPropagators(new_params);
     }
     // We want to spend more time on the LP here.
     new_params.set_add_lp_constraints_lazily(false);
@@ -577,7 +598,7 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
     strategies["objective_lb_search"] = new_params;
 
     if (base_params.use_dual_scheduling_heuristics()) {
-      AddDualSchedulingHeuristics(new_params);
+      AddExtraSchedulingPropagators(new_params);
     }
     new_params.set_linearization_level(2);
     strategies["objective_lb_search_max_lp"] = new_params;
@@ -590,16 +611,37 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
     new_params.set_cp_model_probing_level(0);
     new_params.set_symmetry_level(0);
     if (base_params.use_dual_scheduling_heuristics()) {
-      AddDualSchedulingHeuristics(new_params);
+      AddExtraSchedulingPropagators(new_params);
     }
 
-    strategies["objective_shaving_search"] = new_params;
+    strategies["objective_shaving"] = new_params;
 
     new_params.set_linearization_level(0);
-    strategies["objective_shaving_search_no_lp"] = new_params;
+    strategies["objective_shaving_no_lp"] = new_params;
 
     new_params.set_linearization_level(2);
-    strategies["objective_shaving_search_max_lp"] = new_params;
+    strategies["objective_shaving_max_lp"] = new_params;
+  }
+
+  {
+    SatParameters new_params = base_params;
+    new_params.set_use_variables_shaving_search(true);
+    new_params.set_cp_model_presolve(true);
+    new_params.set_cp_model_probing_level(0);
+    new_params.set_symmetry_level(0);
+    new_params.set_share_objective_bounds(false);
+    new_params.set_share_level_zero_bounds(false);
+
+    strategies["variables_shaving"] = new_params;
+
+    new_params.set_linearization_level(0);
+    strategies["variables_shaving_no_lp"] = new_params;
+
+    if (base_params.use_dual_scheduling_heuristics()) {
+      AddExtraSchedulingPropagators(new_params);
+    }
+    new_params.set_linearization_level(2);
+    strategies["variables_shaving_max_lp"] = new_params;
   }
 
   {
@@ -608,7 +650,7 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
     new_params.set_use_probing_search(true);
     new_params.set_at_most_one_max_expansion_size(2);
     if (base_params.use_dual_scheduling_heuristics()) {
-      AddDualSchedulingHeuristics(new_params);
+      AddExtraSchedulingPropagators(new_params);
     }
     strategies["probing"] = new_params;
 
@@ -654,7 +696,7 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
     new_params.set_linearization_level(2);
     new_params.set_search_branching(SatParameters::LP_SEARCH);
     if (base_params.use_dual_scheduling_heuristics()) {
-      AddDualSchedulingHeuristics(new_params);
+      AddExtraSchedulingPropagators(new_params);
     }
     strategies["reduced_costs"] = new_params;
   }
@@ -678,21 +720,68 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
   // Base parameters for shared tree worker.
   {
     SatParameters new_params = base_params;
+    new_params.set_use_shared_tree_search(true);
     new_params.set_search_branching(SatParameters::AUTOMATIC_SEARCH);
+    new_params.set_linearization_level(0);
+
+    // These settings don't make sense with shared tree search, turn them off as
+    // they can break things.
+    new_params.set_optimize_with_core(false);
+    new_params.set_optimize_with_lb_tree_search(false);
+    new_params.set_optimize_with_max_hs(false);
+
+    // Given that each workers work on a different part of the subtree, it might
+    // not be a good idea to try to work on a global shared solution.
+    //
+    // TODO(user): Experiments more here, in particular we could follow it if
+    // it falls into the current subtree.
+    new_params.set_polarity_exploit_ls_hints(false);
+
     strategies["shared_tree"] = new_params;
   }
 
   // Base parameters for LNS worker.
   {
-    SatParameters new_params = base_params;
-    new_params.set_stop_after_first_solution(false);
-    new_params.set_cp_model_presolve(true);
-    new_params.set_cp_model_probing_level(0);
-    new_params.set_symmetry_level(0);
-    new_params.set_find_big_linear_overlap(false);
-    new_params.set_log_search_progress(false);
-    new_params.set_solution_pool_size(1);  // Keep the best solution found.
-    strategies["lns"] = new_params;
+    SatParameters lns_params = base_params;
+    lns_params.set_stop_after_first_solution(false);
+    lns_params.set_cp_model_presolve(true);
+
+    // We disable costly presolve/inprocessing.
+    lns_params.set_use_sat_inprocessing(false);
+    lns_params.set_cp_model_probing_level(0);
+    lns_params.set_symmetry_level(0);
+    lns_params.set_find_big_linear_overlap(false);
+
+    lns_params.set_log_search_progress(false);
+    lns_params.set_debug_crash_on_bad_hint(false);  // Can happen in lns.
+    lns_params.set_solution_pool_size(1);  // Keep the best solution found.
+    strategies["lns"] = lns_params;
+
+    // Note that we only do this for the derived parameters. The strategy "lns"
+    // will be handled along with the other ones.
+    auto it = absl::c_find_if(
+        base_params.subsolver_params(),
+        [](const SatParameters& params) { return params.name() == "lns"; });
+    if (it != base_params.subsolver_params().end()) {
+      lns_params.MergeFrom(*it);
+    }
+
+    SatParameters lns_params_base = lns_params;
+    lns_params_base.set_linearization_level(0);
+    lns_params_base.set_search_branching(SatParameters::AUTOMATIC_SEARCH);
+    strategies["lns_base"] = lns_params_base;
+
+    SatParameters lns_params_stalling = lns_params;
+    lns_params_stalling.set_search_branching(SatParameters::PORTFOLIO_SEARCH);
+    lns_params_stalling.set_search_random_variable_pool_size(5);
+    strategies["lns_stalling"] = lns_params_stalling;
+
+    // For routing, the LP relaxation seems pretty important, so we prefer an
+    // high linearization level to solve LNS subproblems.
+    SatParameters lns_params_routing = lns_params;
+    lns_params_routing.set_linearization_level(2);
+    lns_params_routing.set_search_branching(SatParameters::AUTOMATIC_SEARCH);
+    strategies["lns_routing"] = lns_params_routing;
   }
 
   // Add user defined ones.
@@ -710,6 +799,11 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
     }
   }
 
+  // Fix names (we don't set them above).
+  for (auto& [name, params] : strategies) {
+    params.set_name(name);
+  }
+
   return strategies;
 }
 
@@ -720,8 +814,9 @@ absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
 //   - Disable linearization_level options for non linear problems
 //   - Fast restart in randomized search
 //   - Different propatation levels for scheduling constraints
-std::vector<SatParameters> GetDiverseSetOfParameters(
-    const SatParameters& base_params, const CpModelProto& cp_model) {
+std::vector<SatParameters> GetFullWorkerParameters(
+    const SatParameters& base_params, const CpModelProto& cp_model,
+    int num_already_present, SubsolverNameFilter* filter) {
   // Defines a set of named strategies so it is easier to read in one place
   // the one that are used. See below.
   const auto strategies = GetNamedParameters(base_params);
@@ -753,7 +848,13 @@ std::vector<SatParameters> GetDiverseSetOfParameters(
     names.push_back("fixed");
     names.push_back("core");
     names.push_back("no_lp");
-    names.push_back("max_lp");
+    if (cp_model.has_symmetry()) {
+      names.push_back("max_lp_sym");
+    } else {
+      // If there is no symmetry, max_lp_sym and max_lp are the same, but
+      // we prefer the less confusing name.
+      names.push_back("max_lp");
+    }
     names.push_back("quick_restart");
     names.push_back("reduced_costs");
     names.push_back("quick_restart_no_lp");
@@ -761,15 +862,15 @@ std::vector<SatParameters> GetDiverseSetOfParameters(
     names.push_back("lb_tree_search");
     names.push_back("probing");
     names.push_back("objective_lb_search");
-    names.push_back("objective_shaving_search_no_lp");
-    names.push_back("objective_shaving_search_max_lp");
+    names.push_back("objective_shaving_no_lp");
+    names.push_back("objective_shaving_max_lp");
     names.push_back("probing_max_lp");
+    names.push_back("probing_no_lp");
     names.push_back("objective_lb_search_no_lp");
     names.push_back("objective_lb_search_max_lp");
-
-#if !defined(__PORTABLE_PLATFORM__) && defined(USE_SCIP)
-    if (absl::GetFlag(FLAGS_cp_model_use_max_hs)) names.push_back("max_hs");
-#endif  // !defined(__PORTABLE_PLATFORM__) && defined(USE_SCIP)
+    if (cp_model.has_symmetry()) {
+      names.push_back("max_lp");
+    }
   } else {
     for (const std::string& name : base_params.subsolvers()) {
       // Hack for flatzinc. At the time of parameter setting, the objective is
@@ -788,14 +889,11 @@ std::vector<SatParameters> GetDiverseSetOfParameters(
   }
 
   // Remove the names that should be ignored.
-  absl::flat_hash_set<std::string> to_ignore;
-  for (const std::string& name : base_params.ignore_subsolvers()) {
-    to_ignore.insert(name);
-  }
   int new_size = 0;
   for (const std::string& name : names) {
-    if (to_ignore.contains(name)) continue;
-    names[new_size++] = name;
+    if (filter->Keep(name)) {
+      names[new_size++] = name;
+    }
   }
   names.resize(new_size);
 
@@ -817,7 +915,9 @@ std::vector<SatParameters> GetDiverseSetOfParameters(
 
     // TODO(user): Enable shaving search in interleave mode.
     // Currently it do not respect ^C, and has no per chunk time limit.
-    if (params.use_objective_shaving_search() && params.interleave_search()) {
+    if ((params.use_objective_shaving_search() ||
+         params.use_variables_shaving_search()) &&
+        params.interleave_search()) {
       continue;
     }
 
@@ -855,24 +955,26 @@ std::vector<SatParameters> GetDiverseSetOfParameters(
     }
 
     // Add this strategy.
-    //
-    // TODO(user): Find a better randomization for the seed so that changing
-    // random_seed() has more impact?
     params.set_name(name);
-    params.set_random_seed(ValidSumSeed(base_params.random_seed(),
-                                        static_cast<int>(result.size()) + 1));
+    params.set_random_seed(CombineSeed(
+        base_params.random_seed(), static_cast<int64_t>(result.size()) + 1));
     result.push_back(params);
   }
 
-  // In interleaved mode, we run all of them
+  // In interleaved mode, we run all of them.
+  //
   // TODO(user): Actually make sure the gap num_workers <-> num_heuristics is
   // contained.
   if (base_params.interleave_search()) return result;
 
-  const int num_non_shared_workers = std::max(
-      0, base_params.num_workers() - base_params.shared_tree_num_workers());
+  // Apply the logic for how many we keep.
+  int num_to_keep = base_params.num_full_subsolvers();
+  if (num_to_keep == 0) {
+    // Derive some automatic number to leave room for LS/LNS and other
+    // strategies not taken into account here.
+    const int num_available =
+        std::max(0, base_params.num_workers() - num_already_present);
 
-  if (cp_model.has_objective() && !cp_model.objective().vars().empty()) {
     const auto heuristic_num_workers = [](int num_workers) {
       DCHECK_GE(num_workers, 0);
       if (num_workers == 1) return 1;
@@ -881,100 +983,200 @@ std::vector<SatParameters> GetDiverseSetOfParameters(
       if (num_workers <= 16) return num_workers - (num_workers / 4 + 1);
       return num_workers - (num_workers / 2 - 3);
     };
-    const int target = std::min<int>(
-        heuristic_num_workers(num_non_shared_workers), result.size());
 
-    // If there is an objective, the extra workers will use LNS.
-    // Make sure we have at least min_num_lns_workers() of them.
-    if (result.size() > target) result.resize(target);
-  } else {  // No objective.
-    // If strategies that do not require a full worker are present, leave a
-    // few workers for them.
-    const bool need_extra_workers =
-        (base_params.use_rins_lns() || base_params.use_feasibility_pump());
-    // Currently, we have 8 SAT search heuristics. So
-    const int num_extra_workers =
-        num_non_shared_workers <= 4 ? 0 : 1 + need_extra_workers;
-    const int target = std::min<int>(num_non_shared_workers - num_extra_workers,
-                                     result.size());
-    if (result.size() > target) result.resize(target);
+    num_to_keep = heuristic_num_workers(num_available);
+  }
+
+  if (result.size() > num_to_keep) {
+    result.resize(std::max(0, num_to_keep));
   }
   return result;
 }
 
-std::vector<SatParameters> GetFirstSolutionParams(
-    const SatParameters& base_params, const CpModelProto& /*cp_model*/,
-    int num_params_to_generate) {
+std::vector<SatParameters> GetFirstSolutionBaseParams(
+    const SatParameters& base_params) {
   std::vector<SatParameters> result;
-  if (num_params_to_generate <= 0) return result;
-  int num_random = 0;
-  int num_random_qr = 0;
-  while (result.size() < num_params_to_generate) {
+
+  const auto get_base = [&result, &base_params](bool fj) {
     SatParameters new_params = base_params;
+    new_params.set_log_search_progress(false);
+    new_params.set_use_feasibility_jump(fj);
+
     const int base_seed = base_params.random_seed();
-    if (num_random <= num_random_qr) {  // Random search.
-      new_params.set_search_branching(SatParameters::RANDOMIZED_SEARCH);
-      new_params.set_search_random_variable_pool_size(5);
-      new_params.set_random_seed(ValidSumSeed(base_seed, 2 * num_random + 1));
-      if (num_random % 2 == 1) {
-        new_params.set_name("random_no_lp");
-        new_params.set_linearization_level(0);
-      } else {
-        new_params.set_name("random");
-      }
-      num_random++;
-    } else {  // Random quick restart.
-      new_params.set_search_branching(
-          SatParameters::PORTFOLIO_WITH_QUICK_RESTART_SEARCH);
-      new_params.set_search_random_variable_pool_size(5);
-      new_params.set_random_seed(ValidSumSeed(base_seed, 2 * num_random_qr));
-      if (num_random_qr % 2 == 1) {
-        new_params.set_name("random_quick_restart_no_lp");
-        new_params.set_linearization_level(0);
-      } else {
-        new_params.set_name("random_quick_restart");
-      }
-      num_random_qr++;
+    new_params.set_random_seed(CombineSeed(base_seed, result.size()));
+    return new_params;
+  };
+
+  // Add one feasibility jump.
+  if (base_params.use_feasibility_jump()) {
+    SatParameters new_params = get_base(true);
+    new_params.set_name("fj");
+    new_params.set_feasibility_jump_linearization_level(0);
+    result.push_back(new_params);
+  }
+
+  // Random search.
+  for (int i = 0; i < 2; ++i) {
+    SatParameters new_params = get_base(false);
+    new_params.set_search_random_variable_pool_size(5);
+    new_params.set_search_branching(SatParameters::RANDOMIZED_SEARCH);
+    if (i % 2 == 0) {
+      new_params.set_name("fs_random_no_lp");
+      new_params.set_linearization_level(0);
+    } else {
+      new_params.set_name("fs_random");
     }
     result.push_back(new_params);
   }
-  return result;
-}
 
-std::vector<SatParameters> GetWorkSharingParams(
-    const SatParameters& base_params, const CpModelProto& cp_model,
-    int num_params_to_generate) {
-  std::vector<SatParameters> result;
-  // TODO(user): We could support assumptions, it's just not implemented.
-  if (!cp_model.assumptions().empty()) return result;
-  if (num_params_to_generate <= 0) return result;
+  // Add a second feasibility jump.
+  if (base_params.use_feasibility_jump()) {
+    SatParameters new_params = get_base(true);
+    new_params.set_name("fj");
+    new_params.set_feasibility_jump_linearization_level(0);
+    result.push_back(new_params);
+  }
 
-  const auto strategies = GetNamedParameters(base_params);
-  const SatParameters& shared_tree_base_params = strategies.at("shared_tree");
-  int num_workers = 0;
-  while (result.size() < num_params_to_generate) {
-    SatParameters new_params = shared_tree_base_params;
-    const int base_seed = base_params.random_seed();
-    new_params.set_random_seed(ValidSumSeed(base_seed, 2 * num_workers + 1));
-    // We force this parameter as it could have been forgotten when set
-    // manually.
-    new_params.set_use_shared_tree_search(true);
+  // Random quick restart.
+  for (int i = 0; i < 2; ++i) {
+    SatParameters new_params = get_base(false);
+    new_params.set_search_random_variable_pool_size(5);
+    new_params.set_search_branching(
+        SatParameters::PORTFOLIO_WITH_QUICK_RESTART_SEARCH);
+    if (i % 2 == 0) {
+      new_params.set_name("fs_random_quick_restart_no_lp");
+      new_params.set_linearization_level(0);
+    } else {
+      new_params.set_name("fs_random_quick_restart");
+    }
+    result.push_back(new_params);
+  }
 
-    // These settings don't make sense with shared tree search, turn them off as
-    // they can break things.
-    new_params.set_optimize_with_core(false);
-    new_params.set_optimize_with_lb_tree_search(false);
-    new_params.set_optimize_with_max_hs(false);
-
-    absl::string_view lp_tags[] = {"no", "default", "max"};
-    new_params.set_name(absl::StrCat(
-        "shared_", lp_tags[std::min(new_params.linearization_level(), 2)],
-        "_lp_", num_workers));
-    num_workers++;
+  // Add a linear feasibility jump.
+  // This one seems to perform worse, so we add only 1 for 2 normal LS, and we
+  // add this late.
+  if (base_params.use_feasibility_jump()) {
+    SatParameters new_params = get_base(true);
+    new_params.set_name("fj_lin");
+    new_params.set_feasibility_jump_linearization_level(2);
     result.push_back(new_params);
   }
 
   return result;
 }
+
+std::vector<SatParameters> RepeatParameters(
+    absl::Span<const SatParameters> base_params, int num_params_to_generate) {
+  // Return if we are done.
+  std::vector<SatParameters> result;
+  result.assign(base_params.begin(), base_params.end());
+  if (result.empty()) return result;
+  if (result.size() >= num_params_to_generate) {
+    result.resize(num_params_to_generate);
+    return result;
+  }
+
+  // Repeat parameters until we have enough.
+  int i = 0;
+  const int base_size = result.size();
+  while (result.size() < num_params_to_generate) {
+    result.push_back(result[i % base_size]);
+    result.back().set_random_seed(CombineSeed(result.back().random_seed(), i));
+    ++i;
+  }
+  return result;
+}
+
+SubsolverNameFilter::SubsolverNameFilter(const SatParameters& params) {
+  for (const auto& pattern : params.filter_subsolvers()) {
+    filter_patterns_.push_back(pattern);
+  }
+  for (const auto& pattern : params.ignore_subsolvers()) {
+    ignore_patterns_.push_back(pattern);
+  }
+
+  // Hack for backward compatibility and easy of use.
+  if (params.use_ls_only()) {
+    filter_patterns_.push_back("ls*");
+    filter_patterns_.push_back("fj*");
+  }
+
+  if (params.use_lns_only()) {
+    // Still add first solution solvers.
+    filter_patterns_.push_back("fj*");
+    filter_patterns_.push_back("fs*");
+    filter_patterns_.push_back("*lns");
+  }
+}
+
+bool SubsolverNameFilter::Keep(absl::string_view name) {
+  last_name_ = name;
+  if (!filter_patterns_.empty()) {
+    bool keep = false;
+    for (const absl::string_view pattern : filter_patterns_) {
+      if (FNMatch(pattern, name)) {
+        keep = true;
+        break;
+      }
+    }
+    if (!keep) {
+      ignored_.emplace_back(name);
+      return false;
+    }
+  }
+  for (const absl::string_view pattern : ignore_patterns_) {
+    if (FNMatch(pattern, name)) {
+      ignored_.emplace_back(name);
+      return false;
+    }
+  }
+  return true;
+}
+
+bool SubsolverNameFilter::FNMatch(absl::string_view pattern,
+                                  absl::string_view str) {
+  bool in_wildcard_match = false;
+  while (true) {
+    if (pattern.empty()) {
+      return in_wildcard_match || str.empty();
+    }
+    if (str.empty()) {
+      return pattern.find_first_not_of('*') == pattern.npos;
+    }
+    switch (pattern.front()) {
+      case '*':
+        pattern.remove_prefix(1);
+        in_wildcard_match = true;
+        break;
+      case '?':
+        pattern.remove_prefix(1);
+        str.remove_prefix(1);
+        break;
+      default:
+        if (in_wildcard_match) {
+          absl::string_view fixed_portion = pattern;
+          const size_t end = fixed_portion.find_first_of("*?");
+          if (end != fixed_portion.npos) {
+            fixed_portion = fixed_portion.substr(0, end);
+          }
+          const size_t match = str.find(fixed_portion);
+          if (match == str.npos) {
+            return false;
+          }
+          pattern.remove_prefix(fixed_portion.size());
+          str.remove_prefix(match + fixed_portion.size());
+          in_wildcard_match = false;
+        } else {
+          if (pattern.front() != str.front()) {
+            return false;
+          }
+          pattern.remove_prefix(1);
+          str.remove_prefix(1);
+        }
+        break;
+    }
+  }
+}
+
 }  // namespace sat
 }  // namespace operations_research

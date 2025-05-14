@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -20,9 +20,10 @@
 #include "absl/log/check.h"
 #include "absl/types/span.h"
 #include "ortools/sat/integer.h"
-#include "ortools/sat/intervals.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
+#include "ortools/sat/scheduling_helpers.h"
 #include "ortools/util/strong_integers.h"
 
 namespace operations_research {
@@ -342,7 +343,7 @@ TimeTablingPerTask::TimeTablingPerTask(AffineExpression capacity,
 
 void TimeTablingPerTask::RegisterWith(GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
-  helper_->WatchAllTasks(id, watcher);
+  helper_->WatchAllTasks(id);
   watcher->WatchUpperBound(capacity_.var, id);
   for (int t = 0; t < num_tasks_; t++) {
     watcher->WatchLowerBound(demands_->Demands()[t], id);
@@ -416,7 +417,7 @@ bool TimeTablingPerTask::BuildProfile() {
   const IntegerValue default_non_relevant_height =
       has_demand_equal_to_capacity_ ? 1 : 0;
 
-  const auto& by_decreasing_start_max = helper_->TaskByDecreasingStartMax();
+  const auto& by_negated_start_max = helper_->TaskByIncreasingNegatedStartMax();
   const auto& by_end_min = helper_->TaskByIncreasingEndMin();
 
   // Next start/end of the compulsory parts to be processed. Note that only the
@@ -427,13 +428,12 @@ bool TimeTablingPerTask::BuildProfile() {
   while (next_end < num_tasks) {
     IntegerValue time = by_end_min[next_end].time;
     if (next_start >= 0) {
-      time = std::min(time, by_decreasing_start_max[next_start].time);
+      time = std::min(time, -by_negated_start_max[next_start].time);
     }
 
     // Process the starting compulsory parts.
-    while (next_start >= 0 &&
-           by_decreasing_start_max[next_start].time == time) {
-      const int t = by_decreasing_start_max[next_start].task_index;
+    while (next_start >= 0 && -by_negated_start_max[next_start].time == time) {
+      const int t = by_negated_start_max[next_start].task_index;
       current_height += demands_min[t];
       --next_start;
     }

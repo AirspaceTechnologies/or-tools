@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,6 +31,7 @@
 #include "absl/meta/type_traits.h"
 #include "absl/types/span.h"
 #include "ortools/base/logging.h"
+#include "ortools/base/mathutil.h"
 #include "ortools/base/stl_util.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/graph/graph.h"
@@ -37,10 +39,12 @@
 #include "ortools/sat/clause.h"
 #include "ortools/sat/cp_constraints.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_solver.h"
 #include "ortools/sat/synchronization.h"
+#include "ortools/sat/util.h"
 #include "ortools/util/bitset.h"
 #include "ortools/util/logging.h"
 #include "ortools/util/strong_integers.h"
@@ -208,15 +212,18 @@ void PrecedenceRelations::Build() {
   is_built_ = true;
 
   const int num_nodes = graph_.num_nodes();
-  absl::StrongVector<IntegerVariable, std::vector<IntegerVariable>> before(
-      num_nodes);
+  util_intops::StrongVector<IntegerVariable, std::vector<IntegerVariable>>
+      before(num_nodes);
 
   // We will construct a graph with the current relation from all_relations_.
   // And use this to compute the "closure".
-  // Note that the non-determinism of the arcs order shouldn't matter.
   CHECK(arc_offsets_.empty());
   graph_.ReserveArcs(2 * root_relations_.size());
-  for (const auto [var_pair, negated_offset] : root_relations_) {
+  std::vector<
+      std::pair<std::pair<IntegerVariable, IntegerVariable>, IntegerValue>>
+      root_relations_sorted(root_relations_.begin(), root_relations_.end());
+  std::sort(root_relations_sorted.begin(), root_relations_sorted.end());
+  for (const auto [var_pair, negated_offset] : root_relations_sorted) {
     // TODO(user): Support negative offset?
     //
     // Note that if we only have >= 0 ones, if we do have a cycle, we could
@@ -308,7 +315,7 @@ void PrecedenceRelations::Build() {
 }
 
 void PrecedenceRelations::ComputeFullPrecedences(
-    const std::vector<IntegerVariable>& vars,
+    absl::Span<const IntegerVariable> vars,
     std::vector<FullIntegerPrecedence>* output) {
   output->clear();
   if (!is_built_) Build();
@@ -402,7 +409,7 @@ void PrecedenceRelations::ComputeFullPrecedences(
 }
 
 void PrecedenceRelations::CollectPrecedences(
-    const std::vector<IntegerVariable>& vars,
+    absl::Span<const IntegerVariable> vars,
     std::vector<PrecedenceData>* output) {
   // +1 for the negation.
   const int needed_size =
@@ -645,8 +652,9 @@ void PrecedencesPropagator::AddArc(
     // A self-arc is either plain SAT or plain UNSAT or it forces something on
     // the given offset_var or presence_literal_index. In any case it could be
     // presolved in something more efficient.
-    VLOG(1) << "Self arc! This could be presolved. " << "var:" << tail
-            << " offset:" << offset << " offset_var:" << offset_var
+    VLOG(1) << "Self arc! This could be presolved. "
+            << "var:" << tail << " offset:" << offset
+            << " offset_var:" << offset_var
             << " conditioned_by:" << presence_literals;
   }
 
@@ -1097,9 +1105,8 @@ bool PrecedencesPropagator::BellmanFordTarjan(Trail* trail) {
   return true;
 }
 
-void GreaterThanAtLeastOneOfDetector::Add(Literal lit, LinearTerm a,
-                                          LinearTerm b, IntegerValue lhs,
-                                          IntegerValue rhs) {
+void BinaryRelationRepository::Add(Literal lit, LinearTerm a, LinearTerm b,
+                                   IntegerValue lhs, IntegerValue rhs) {
   Relation r;
   r.enforcement = lit;
   r.a = a;
@@ -1117,13 +1124,19 @@ void GreaterThanAtLeastOneOfDetector::Add(Literal lit, LinearTerm a,
     r.b.coeff = -r.b.coeff;
   }
 
-  const int index = relations_.size();
   relations_.push_back(std::move(r));
+}
 
-  if (lit.Index() >= lit_to_relations_.size()) {
-    lit_to_relations_.resize(lit.Index() + 1);
+void BinaryRelationRepository::Build() {
+  DCHECK(!is_built_);
+  is_built_ = true;
+  std::vector<LiteralIndex> keys;
+  const int num_relations = relations_.size();
+  keys.reserve(num_relations);
+  for (int i = 0; i < num_relations; ++i) {
+    keys.push_back(relations_[i].enforcement.Index());
   }
-  lit_to_relations_[lit.Index()].push_back(index);
+  lit_to_relations_.ResetFromFlatMapping(keys, IdentityMap<int>());
 }
 
 bool GreaterThanAtLeastOneOfDetector::AddRelationFromIndices(
@@ -1136,7 +1149,7 @@ bool GreaterThanAtLeastOneOfDetector::AddRelationFromIndices(
 
   const IntegerValue var_lb = integer_trail->LevelZeroLowerBound(var);
   for (const int index : indices) {
-    Relation r = relations_[index];
+    Relation r = repository_.relation(index);
     if (r.a.var != PositiveVariable(var)) std::swap(r.a, r.b);
     CHECK_EQ(r.a.var, PositiveVariable(var));
 
@@ -1192,9 +1205,8 @@ int GreaterThanAtLeastOneOfDetector::
   // Collect all relations impacted by this clause.
   std::vector<std::pair<IntegerVariable, int>> infos;
   for (const Literal l : clause) {
-    if (l.Index() >= lit_to_relations_.size()) continue;
-    for (const int index : lit_to_relations_[l.Index()]) {
-      const Relation& r = relations_[index];
+    for (const int index : repository_.relation_indices(l.Index())) {
+      const Relation& r = repository_.relation(index);
       if (r.a.var != kNoIntegerVariable && IntTypeAbs(r.a.coeff) == 1) {
         infos.push_back({r.a.var, index});
       }
@@ -1245,9 +1257,9 @@ int GreaterThanAtLeastOneOfDetector::
   auto* solver = model->GetOrCreate<SatSolver>();
 
   // Fill the set of interesting relations for each variables.
-  absl::StrongVector<IntegerVariable, std::vector<int>> var_to_relations;
-  for (int index = 0; index < relations_.size(); ++index) {
-    const Relation& r = relations_[index];
+  util_intops::StrongVector<IntegerVariable, std::vector<int>> var_to_relations;
+  for (int index = 0; index < repository_.size(); ++index) {
+    const Relation& r = repository_.relation(index);
     if (r.a.var != kNoIntegerVariable && IntTypeAbs(r.a.coeff) == 1) {
       if (r.a.var >= var_to_relations.size()) {
         var_to_relations.resize(r.a.var + 1);
@@ -1274,7 +1286,7 @@ int GreaterThanAtLeastOneOfDetector::
     if (solver->ModelIsUnsat()) return num_added_constraints;
     std::vector<Literal> clause;
     for (const int index : var_to_relations[target]) {
-      const Literal literal = relations_[index].enforcement;
+      const Literal literal = repository_.relation(index).enforcement;
       if (solver->Assignment().LiteralIsFalse(literal)) continue;
       const SatSolver::Status status =
           solver->EnqueueDecisionAndBacktrackOnConflict(literal.Negated());
@@ -1294,7 +1306,7 @@ int GreaterThanAtLeastOneOfDetector::
 
     std::vector<int> indices;
     for (const int index : var_to_relations[target]) {
-      const Literal literal = relations_[index].enforcement;
+      const Literal literal = repository_.relation(index).enforcement;
       if (clause_set.contains(literal)) {
         indices.push_back(index);
       }
@@ -1321,7 +1333,7 @@ int GreaterThanAtLeastOneOfDetector::AddGreaterThanAtLeastOneOfConstraints(
   auto* logger = model->GetOrCreate<SolverLogger>();
 
   int num_added_constraints = 0;
-  SOLVER_LOG(logger, "[Precedences] num_relations=", relations_.size(),
+  SOLVER_LOG(logger, "[Precedences] num_relations=", repository_.size(),
              " num_clauses=", clauses->AllClausesInCreationOrder().size());
 
   // We have two possible approaches. For now, we prefer the first one except if
@@ -1373,11 +1385,59 @@ int GreaterThanAtLeastOneOfDetector::AddGreaterThanAtLeastOneOfConstraints(
                " GreaterThanAtLeastOneOf() constraints.");
   }
 
-  // Release the memory, it is not longer needed.
-  gtl::STLClearObject(&relations_);
-  gtl::STLClearObject(&lit_to_relations_);
-
   return num_added_constraints;
+}
+
+bool BinaryRelationRepository::PropagateLocalBounds(
+    const IntegerTrail& integer_trail, Literal lit,
+    const absl::flat_hash_map<IntegerVariable, IntegerValue>& input,
+    absl::flat_hash_map<IntegerVariable, IntegerValue>* output) const {
+  output->clear();
+  if (lit.Index() >= lit_to_relations_.size()) return true;
+
+  auto get_lower_bound = [&](IntegerVariable var) {
+    const auto it = input.find(var);
+    if (it != input.end()) return it->second;
+    return integer_trail.LevelZeroLowerBound(var);
+  };
+  auto get_upper_bound = [&](IntegerVariable var) {
+    return -get_lower_bound(NegationOf(var));
+  };
+  auto update_lower_bound_by_var = [&](IntegerVariable var, IntegerValue lb) {
+    if (lb <= integer_trail.LevelZeroLowerBound(var)) return;
+    const auto [it, inserted] = output->insert({var, lb});
+    if (!inserted) {
+      it->second = std::max(it->second, lb);
+    }
+  };
+  auto update_upper_bound_by_var = [&](IntegerVariable var, IntegerValue ub) {
+    update_lower_bound_by_var(NegationOf(var), -ub);
+  };
+  auto update_var_bounds = [&](const LinearTerm& a, const LinearTerm& b,
+                               IntegerValue lhs, IntegerValue rhs) {
+    if (a.coeff == 0) return;
+
+    // lb(b.y) <= b.y <= ub(b.y) and lhs <= a.x + b.y <= rhs imply
+    //   ceil((lhs - ub(b.y)) / a) <= x <= floor((rhs - lb(b.y)) / a)
+    lhs = lhs - b.coeff * get_upper_bound(b.var);
+    rhs = rhs - b.coeff * get_lower_bound(b.var);
+    update_lower_bound_by_var(a.var, MathUtil::CeilOfRatio(lhs, a.coeff));
+    update_upper_bound_by_var(a.var, MathUtil::FloorOfRatio(rhs, a.coeff));
+  };
+  for (const int relation_index : lit_to_relations_[lit]) {
+    auto r = relations_[relation_index];
+    r.a.MakeCoeffPositive();
+    r.b.MakeCoeffPositive();
+    update_var_bounds(r.a, r.b, r.lhs, r.rhs);
+    update_var_bounds(r.b, r.a, r.lhs, r.rhs);
+  }
+
+  // Check feasibility.
+  // TODO(user): we might do that earlier?
+  for (const auto [var, lb] : *output) {
+    if (lb > integer_trail.LevelZeroUpperBound(var)) return false;
+  }
+  return true;
 }
 
 }  // namespace sat

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,8 +19,10 @@
 
 #include <optional>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "ortools/math_opt/constraints/quadratic/quadratic_constraint.h"
 #include "ortools/math_opt/cpp/basis_status.h"
 #include "ortools/math_opt/cpp/enums.h"  // IWYU pragma: export
 #include "ortools/math_opt/cpp/linear_constraint.h"
@@ -143,6 +145,11 @@ struct DualSolution {
   DualSolutionProto Proto() const;
 
   LinearConstraintMap<double> dual_values;
+
+  // Note: Some solvers only return quadratic constraint duals when a
+  // solver-specific parameter is set
+  // (see go/mathopt-qcqp-dual#solver-specific).
+  absl::flat_hash_map<QuadraticConstraint, double> quadratic_dual_values;
   VariableMap<double> reduced_costs;
   std::optional<double> objective_value;
 

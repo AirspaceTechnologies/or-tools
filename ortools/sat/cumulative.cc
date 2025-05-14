@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,10 +19,12 @@
 
 #include "absl/log/check.h"
 #include "absl/strings/str_join.h"
+#include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/sat/cumulative_energy.h"
 #include "ortools/sat/disjunctive.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/integer_expr.h"
 #include "ortools/sat/intervals.h"
 #include "ortools/sat/linear_constraint.h"
@@ -41,15 +43,24 @@ namespace sat {
 
 std::function<void(Model*)> Cumulative(
     const std::vector<IntervalVariable>& vars,
-    const std::vector<AffineExpression>& demands, AffineExpression capacity,
+    absl::Span<const AffineExpression> demands, AffineExpression capacity,
     SchedulingConstraintHelper* helper) {
-  return [=](Model* model) mutable {
-    if (vars.empty()) return;
-
+  return [=, demands = std::vector<AffineExpression>(
+                 demands.begin(), demands.end())](Model* model) mutable {
     auto* intervals = model->GetOrCreate<IntervalsRepository>();
     auto* encoder = model->GetOrCreate<IntegerEncoder>();
     auto* integer_trail = model->GetOrCreate<IntegerTrail>();
     auto* watcher = model->GetOrCreate<GenericLiteralWatcher>();
+    SatSolver* sat_solver = model->GetOrCreate<SatSolver>();
+
+    if (!integer_trail->SafeEnqueue(capacity.GreaterOrEqual(0), {})) {
+      sat_solver->NotifyThatModelIsUnsat();
+    }
+    if (demands.empty()) {
+      // If there is no demand, since we already added a constraint that the
+      // capacity is not negative above, we can stop here.
+      return;
+    }
 
     // Redundant constraints to ensure that the resource capacity is high enough
     // for each task. Also ensure that no task consumes more resource than what
@@ -249,6 +260,22 @@ std::function<void(Model*)> Cumulative(
     if (parameters.use_overload_checker_in_cumulative()) {
       AddCumulativeOverloadChecker(capacity, helper, demands_helper, model);
     }
+    if (parameters.use_conservative_scale_overload_checker()) {
+      // Since we use the potential DFF conflict on demands to apply the
+      // heuristic, only do so if any demand is greater than 1.
+      bool any_demand_greater_than_one = false;
+      for (int i = 0; i < vars.size(); ++i) {
+        const IntegerValue demand_min = integer_trail->LowerBound(demands[i]);
+        if (demand_min > 1) {
+          any_demand_greater_than_one = true;
+          break;
+        }
+      }
+      if (any_demand_greater_than_one) {
+        AddCumulativeOverloadCheckerDff(capacity, helper, demands_helper,
+                                        model);
+      }
+    }
 
     // Propagator responsible for applying the Timetable Edge finding filtering
     // rule. It increases the minimum of the start variables and decreases the
@@ -265,10 +292,12 @@ std::function<void(Model*)> Cumulative(
 }
 
 std::function<void(Model*)> CumulativeTimeDecomposition(
-    const std::vector<IntervalVariable>& vars,
-    const std::vector<AffineExpression>& demands, AffineExpression capacity,
+    absl::Span<const IntervalVariable> vars,
+    absl::Span<const AffineExpression> demands, AffineExpression capacity,
     SchedulingConstraintHelper* helper) {
-  return [=](Model* model) {
+  return [=, vars = std::vector<IntervalVariable>(vars.begin(), vars.end()),
+          demands = std::vector<AffineExpression>(
+              demands.begin(), demands.end())](Model* model) {
     if (vars.empty()) return;
 
     IntegerTrail* integer_trail = model->GetOrCreate<IntegerTrail>();
@@ -347,10 +376,12 @@ std::function<void(Model*)> CumulativeTimeDecomposition(
 }
 
 std::function<void(Model*)> CumulativeUsingReservoir(
-    const std::vector<IntervalVariable>& vars,
-    const std::vector<AffineExpression>& demands, AffineExpression capacity,
+    absl::Span<const IntervalVariable> vars,
+    absl::Span<const AffineExpression> demands, AffineExpression capacity,
     SchedulingConstraintHelper* helper) {
-  return [=](Model* model) {
+  return [=, vars = std::vector<IntervalVariable>(vars.begin(), vars.end()),
+          demands = std::vector<AffineExpression>(
+              demands.begin(), demands.end())](Model* model) {
     if (vars.empty()) return;
 
     auto* integer_trail = model->GetOrCreate<IntegerTrail>();

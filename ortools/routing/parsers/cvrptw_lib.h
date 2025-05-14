@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -70,7 +70,7 @@ class LocationContainer {
 
   std::mt19937 randomizer_;
   const int64_t speed_;
-  absl::StrongVector<RoutingIndexManager::NodeIndex, Location> locations_;
+  util_intops::StrongVector<RoutingIndexManager::NodeIndex, Location> locations_;
 };
 
 // Random demand.

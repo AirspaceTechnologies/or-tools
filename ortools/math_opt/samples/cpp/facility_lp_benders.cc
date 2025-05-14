@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -376,7 +376,7 @@ absl::StatusOr<std::unique_ptr<SecondStageSolver>> SecondStageSolver::New(
       absl::WrapUnique<SecondStageSolver>(
           new SecondStageSolver(std::move(instance), parameters));
   ASSIGN_OR_RETURN(std::unique_ptr<math_opt::IncrementalSolver> solver,
-                   math_opt::IncrementalSolver::New(
+                   math_opt::NewIncrementalSolver(
                        &second_stage_solver->second_stage_model_, solver_type));
   second_stage_solver->solver_ = std::move(solver);
   return std::move(second_stage_solver);
@@ -593,7 +593,7 @@ absl::Status Benders(const FacilityLocationInstance& instance,
   FirstStageProblem first_stage(instance.network, instance.facility_cost);
   ASSIGN_OR_RETURN(
       const std::unique_ptr<math_opt::IncrementalSolver> first_stage_solver,
-      math_opt::IncrementalSolver::New(&first_stage.model, solver_type));
+      math_opt::NewIncrementalSolver(&first_stage.model, solver_type));
   // Setup second stage solver.
   ASSIGN_OR_RETURN(std::unique_ptr<SecondStageSolver> second_stage_solver,
                    SecondStageSolver::New(instance, solver_type));

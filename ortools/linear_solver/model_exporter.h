@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,7 +16,9 @@
 
 #include <string>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 #include "ortools/linear_solver/linear_solver.pb.h"
 
 namespace operations_research {
@@ -93,6 +95,16 @@ absl::StatusOr<std::string> ExportModelAsLpFormat(
  */
 absl::StatusOr<std::string> ExportModelAsMpsFormat(
     const MPModelProto& model,
+    const MPModelExportOptions& options = MPModelExportOptions());
+
+/**
+ * Write the current model (variables, constraints, objective) to a file in MPS
+ * file format, using the "free" MPS format.
+ *
+ * See ExportModelAsMpsFormat().
+ */
+absl::Status WriteModelToMpsFile(
+    absl::string_view filename, const MPModelProto& model,
     const MPModelExportOptions& options = MPModelExportOptions());
 
 }  // namespace operations_research

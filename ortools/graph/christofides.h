@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -27,13 +27,15 @@
 #define OR_TOOLS_GRAPH_CHRISTOFIDES_H_
 
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/types.h"
 #include "ortools/graph/eulerian_path.h"
 #include "ortools/graph/graph.h"
 #include "ortools/graph/minimum_spanning_tree.h"
@@ -83,7 +85,17 @@ class ChristofidesPathSolver {
   bool Solve();
 
  private:
-  int64_t SafeAdd(int64_t a, int64_t b) { return CapAdd(a, b); }
+  // Safe addition operator to avoid overflows when possible.
+  template <typename T>
+  T SafeAdd(T a, T b) {
+    // TODO(user): use std::remove_cvref_t<T> once C++20 is available.
+    if constexpr (std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>,
+                                 int64_t> == true) {
+      return CapAdd(a, b);
+    } else {
+      return a + b;
+    }
+  }
 
   // Matching algorithm to use.
   MatchingAlgorithm matching_;

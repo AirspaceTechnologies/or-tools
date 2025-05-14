@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,6 +18,7 @@
 #include <iostream>
 #include <ostream>
 #include <string>
+#include <utility>
 
 #include "absl/strings/str_cat.h"
 
@@ -27,7 +28,7 @@ SolverLogger::SolverLogger() { timer_.Start(); }
 
 void SolverLogger::AddInfoLoggingCallback(
     std::function<void(const std::string& message)> callback) {
-  info_callbacks_.push_back(callback);
+  info_callbacks_.push_back(std::move(callback));
 }
 
 void SolverLogger::ClearInfoLoggingCallbacks() { info_callbacks_.clear(); }

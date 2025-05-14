@@ -1,4 +1,4 @@
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -27,7 +27,6 @@ if(MSVC)
     "/D_CRT_SECURE_NO_WARNINGS"
     "/D_CRT_SECURE_NO_DEPRECATE"
     "/MP" # Build with multiple processes
-    "/DNDEBUG"
     )
   # MSVC warning suppressions
   list(APPEND FLATZINC_COMPILE_OPTIONS
@@ -71,8 +70,6 @@ add_library(flatzinc
   ortools/flatzinc/parser.yy.cc
   #ortools/flatzinc/parser_util.cc # Already #include in parser.tab.cc
   ortools/flatzinc/parser_util.h
-  ortools/flatzinc/presolve.cc
-  ortools/flatzinc/presolve.h
   )
 ## Includes
 target_include_directories(flatzinc PUBLIC
@@ -184,8 +181,8 @@ file(RELATIVE_PATH FZ_REL_INSTALL_BINARY
   ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/minizinc/solvers
   ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/fzn-cp-sat)
 configure_file(
-  ortools/flatzinc/cpsat.msc.in
-  ${PROJECT_BINARY_DIR}/cpsat.msc
+  ortools/flatzinc/cp-sat.msc.in
+  ${PROJECT_BINARY_DIR}/cp-sat.msc
   @ONLY)
 
 # Install rules
@@ -199,7 +196,7 @@ install(TARGETS flatzinc fzn #fzn-parser_test
   )
 
 install(DIRECTORY ortools/flatzinc/mznlib/
-  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/cpsat
+  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/cp-sat
   FILES_MATCHING PATTERN "*.mzn")
-install(FILES ${PROJECT_BINARY_DIR}/cpsat.msc
+install(FILES ${PROJECT_BINARY_DIR}/cp-sat.msc
   DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/solvers)

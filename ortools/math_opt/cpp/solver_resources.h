@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+// IWYU pragma: private, include "ortools/math_opt/cpp/math_opt.h"
+// IWYU pragma: friend "ortools/math_opt/cpp/.*"
 
 #ifndef OR_TOOLS_MATH_OPT_CPP_SOLVER_RESOURCES_H_
 #define OR_TOOLS_MATH_OPT_CPP_SOLVER_RESOURCES_H_
@@ -27,13 +30,17 @@ namespace operations_research::math_opt {
 // parameters are hints and may be ignored by the remote server (in particular
 // in case of solve in a local subprocess, for example).
 //
-// When using RemoteSolve() and RemoteComputeInfeasibleSubsystem(), these hints
-// are mostly optional as some defaults will be computed based on the other
-// parameters.
+// When using:
+// - RemoteSolve(),
+// - RemoteComputeInfeasibleSubsystem(),
+// - XxxRemoteStreamingSolve(),
+// - XxxRemoteStreamingComputeInfeasibleSubsystem(),
+// these hints are recommended but optional. When they are not provided,
+// resource usage will be estimated based on other parameters.
 //
-// When using RemoteStreamingSolve() these hints are used to dimension the
-// resources available during the execution of every action; thus it is
-// recommended to set them.
+// When using NewXxxRemoteStreamingIncrementalSolver() these hints are used to
+// dimension the resources available during the execution of every action; thus
+// it is recommended to set them.
 //
 struct SolverResources {
   // The number of solver threads that are expected to actually execute in

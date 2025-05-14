@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,12 +17,15 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
+#include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
@@ -32,12 +35,14 @@
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
 #include "google/protobuf/message.h"
+#include "ortools/algorithms/binary_search.h"
 #include "ortools/algorithms/find_graph_symmetries.h"
 #include "ortools/algorithms/sparse_permutation.h"
 #include "ortools/base/hash.h"
 #include "ortools/base/logging.h"
 #include "ortools/graph/graph.h"
 #include "ortools/sat/cp_model.pb.h"
+#include "ortools/sat/cp_model_checker.h"
 #include "ortools/sat/cp_model_mapping.h"
 #include "ortools/sat/cp_model_utils.h"
 #include "ortools/sat/model.h"
@@ -45,10 +50,13 @@
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_parameters.pb.h"
 #include "ortools/sat/sat_solver.h"
+#include "ortools/sat/solution_crush.h"
 #include "ortools/sat/symmetry_util.h"
 #include "ortools/sat/util.h"
 #include "ortools/util/affine_relation.h"
 #include "ortools/util/logging.h"
+#include "ortools/util/saturated_arithmetic.h"
+#include "ortools/util/sorted_interval_list.h"
 #include "ortools/util/time_limit.h"
 
 namespace operations_research {
@@ -62,6 +70,19 @@ struct VectorHash {
       hash = util_hash::Hash(value, hash);
     }
     return hash;
+  }
+};
+
+struct NodeExprCompare {
+  bool operator()(const LinearExpressionProto& a,
+                  const LinearExpressionProto& b) const {
+    if (a.offset() != b.offset()) return a.offset() < b.offset();
+    if (a.vars_size() != b.vars_size()) return a.vars_size() < b.vars_size();
+    for (int i = 0; i < a.vars_size(); ++i) {
+      if (a.vars(i) != b.vars(i)) return a.vars(i) < b.vars(i);
+      if (a.coeffs(i) != b.coeffs(i)) return a.coeffs(i) < b.coeffs(i);
+    }
+    return false;
   }
 };
 
@@ -97,6 +118,28 @@ void Append(
   }
 }
 
+bool IsIntervalFixedSize(const IntervalConstraintProto& interval) {
+  if (!interval.size().vars().empty()) {
+    return false;
+  }
+  if (interval.start().vars().size() != interval.end().vars().size()) {
+    return false;
+  }
+  for (int i = 0; i < interval.start().vars().size(); ++i) {
+    if (interval.start().coeffs(i) != interval.end().coeffs(i)) {
+      return false;
+    }
+    if (interval.start().vars(i) != interval.end().vars(i)) {
+      return false;
+    }
+  }
+  if (interval.end().offset() !=
+      interval.start().offset() + interval.size().offset()) {
+    return false;
+  }
+  return true;
+}
+
 // Returns a graph whose automorphisms can be mapped back to the symmetries of
 // the model described in the given CpModelProto.
 //
@@ -130,22 +173,25 @@ std::unique_ptr<Graph> GenerateGraphForSymmetryDetection(
     VARIABLE_NODE,
     VAR_COEFFICIENT_NODE,
     CONSTRAINT_NODE,
+    VAR_LIN_EXPR_NODE,
   };
   IdGenerator color_id_generator;
   initial_equivalence_classes->clear();
-  auto new_node = [&initial_equivalence_classes, &graph,
-                   &color_id_generator](const std::vector<int64_t>& color) {
+  auto new_node_from_id = [&initial_equivalence_classes, &graph](int color_id) {
     // Since we add nodes one by one, initial_equivalence_classes->size() gives
     // the number of nodes at any point, which we use as the next node index.
     const int node = initial_equivalence_classes->size();
-    initial_equivalence_classes->push_back(color_id_generator.GetId(color));
+    initial_equivalence_classes->push_back(color_id);
 
     // In some corner cases, we create a node but never uses it. We still
     // want it to be there.
     graph->AddNode(node);
     return node;
   };
-
+  auto new_node = [&new_node_from_id,
+                   &color_id_generator](const std::vector<int64_t>& color) {
+    return new_node_from_id(color_id_generator.GetId(color));
+  };
   // For two variables to be in the same equivalence class, they need to have
   // the same objective coefficient, and the same possible bounds.
   //
@@ -169,29 +215,43 @@ std::unique_ptr<Graph> GenerateGraphForSymmetryDetection(
     CHECK_EQ(v, new_node(tmp_color));
   }
 
+  const int color_id_for_coeff_one =
+      color_id_generator.GetId({VAR_COEFFICIENT_NODE, 1});
+  const int color_id_for_coeff_minus_one =
+      color_id_generator.GetId({VAR_COEFFICIENT_NODE, -1});
+
   // We will lazily create "coefficient nodes" that correspond to a variable
   // with a given coefficient.
   absl::flat_hash_map<std::pair<int64_t, int64_t>, int> coefficient_nodes;
-  auto get_coefficient_node = [&new_node, &graph, &coefficient_nodes,
-                               &tmp_color](int var, int64_t coeff) {
-    const int var_node = var;
-    DCHECK(RefIsPositive(var));
+  auto get_coefficient_node =
+      [&new_node_from_id, &graph, &coefficient_nodes, &color_id_generator,
+       &tmp_color, color_id_for_coeff_minus_one](int var, int64_t coeff) {
+        const int var_node = var;
+        DCHECK(RefIsPositive(var));
 
-    // For a coefficient of one, which are the most common, we can optimize the
-    // size of the graph by omitting the coefficient node altogether and using
-    // directly the var_node in this case.
-    if (coeff == 1) return var_node;
+        // For a coefficient of one, which are the most common, we can optimize
+        // the size of the graph by omitting the coefficient node altogether and
+        // using directly the var_node in this case.
+        if (coeff == 1) return var_node;
 
-    const auto insert =
-        coefficient_nodes.insert({std::make_pair(var, coeff), 0});
-    if (!insert.second) return insert.first->second;
+        const auto insert =
+            coefficient_nodes.insert({std::make_pair(var, coeff), 0});
+        if (!insert.second) return insert.first->second;
 
-    tmp_color = {VAR_COEFFICIENT_NODE, coeff};
-    const int secondary_node = new_node(tmp_color);
-    graph->AddArc(var_node, secondary_node);
-    insert.first->second = secondary_node;
-    return secondary_node;
-  };
+        int color_id;
+        // Because -1 is really common (also used for negated literal), we have
+        // a fast path for it.
+        if (coeff == -1) {
+          color_id = color_id_for_coeff_minus_one;
+        } else {
+          tmp_color = {VAR_COEFFICIENT_NODE, coeff};
+          color_id = color_id_generator.GetId(tmp_color);
+        }
+        const int secondary_node = new_node_from_id(color_id);
+        graph->AddArc(var_node, secondary_node);
+        insert.first->second = secondary_node;
+        return secondary_node;
+      };
 
   // For a literal we use the same as a coefficient 1 or -1. We can do that
   // because literal and (var, coefficient) never appear together in the same
@@ -213,15 +273,16 @@ std::unique_ptr<Graph> GenerateGraphForSymmetryDetection(
   // node. This makes sure that any permutation that touch a variable, must
   // permute its coefficient nodes accordingly.
   absl::flat_hash_set<std::pair<int, int>> implications;
-  auto get_implication_node = [&new_node, &graph, &coefficient_nodes,
-                               &tmp_color](int ref) {
+  auto get_implication_node = [&new_node_from_id, &graph, &coefficient_nodes,
+                               color_id_for_coeff_one,
+                               color_id_for_coeff_minus_one](int ref) {
     const int var = PositiveRef(ref);
     const int64_t coeff = RefIsPositive(ref) ? 1 : -1;
     const auto insert =
         coefficient_nodes.insert({std::make_pair(var, coeff), 0});
     if (!insert.second) return insert.first->second;
-    tmp_color = {VAR_COEFFICIENT_NODE, coeff};
-    const int secondary_node = new_node(tmp_color);
+    const int secondary_node = new_node_from_id(
+        coeff == 1 ? color_id_for_coeff_one : color_id_for_coeff_minus_one);
     graph->AddArc(var, secondary_node);
     insert.first->second = secondary_node;
     return secondary_node;
@@ -237,6 +298,35 @@ std::unique_ptr<Graph> GenerateGraphForSymmetryDetection(
     graph->AddArc(get_implication_node(NegatedRef(ref_b)),
                   get_implication_node(NegatedRef(ref_a)));
   };
+
+  auto make_linear_expr_node = [&new_node, &graph, &get_coefficient_node](
+                                   const LinearExpressionProto& expr,
+                                   const std::vector<int64_t>& color) {
+    std::vector<int64_t> local_color = color;
+    local_color.push_back(expr.offset());
+    const int local_node = new_node(local_color);
+
+    for (int i = 0; i < expr.vars().size(); ++i) {
+      const int ref = expr.vars(i);
+      const int var_node = PositiveRef(ref);
+      const int64_t coeff =
+          RefIsPositive(ref) ? expr.coeffs(i) : -expr.coeffs(i);
+      graph->AddArc(get_coefficient_node(var_node, coeff), local_node);
+    }
+    return local_node;
+  };
+
+  absl::btree_map<LinearExpressionProto, int, NodeExprCompare> expr_nodes;
+  auto shared_linear_expr_node =
+      [&make_linear_expr_node, &expr_nodes](const LinearExpressionProto& expr) {
+        const auto [it, inserted] = expr_nodes.insert({expr, 0});
+        if (inserted) {
+          const std::vector<int64_t> local_color = {VAR_LIN_EXPR_NODE,
+                                                    expr.offset()};
+          it->second = make_linear_expr_node(expr, local_color);
+        }
+        return it->second;
+      };
 
   // We need to keep track of this for scheduling constraints.
   absl::flat_hash_map<int, int> interval_constraint_index_to_node;
@@ -270,6 +360,14 @@ std::unique_ptr<Graph> GenerateGraphForSymmetryDetection(
                                     : -constraint.linear().coeffs(i);
           graph->AddArc(get_coefficient_node(variable_node, coeff),
                         constraint_node);
+        }
+        break;
+      }
+      case ConstraintProto::kAllDiff: {
+        CHECK_EQ(constraint_node, new_node(color));
+        for (const LinearExpressionProto& expr :
+             constraint.all_diff().exprs()) {
+          graph->AddArc(shared_linear_expr_node(expr), constraint_node);
         }
         break;
       }
@@ -328,75 +426,54 @@ std::unique_ptr<Graph> GenerateGraphForSymmetryDetection(
         const LinearExpressionProto& target_expr =
             constraint.lin_max().target();
 
-        std::vector<int64_t> local_color = color;
-        local_color.push_back(target_expr.offset());
-        const int target_node = new_node(local_color);
-        local_color.pop_back();
-
-        for (int j = 0; j < target_expr.vars_size(); ++j) {
-          const int var = target_expr.vars(j);
-          DCHECK(RefIsPositive(var));
-          const int64_t coeff = target_expr.coeffs(j);
-          graph->AddArc(get_coefficient_node(var, coeff), target_node);
-        }
+        const int target_node = make_linear_expr_node(target_expr, color);
 
         for (int i = 0; i < constraint.lin_max().exprs_size(); ++i) {
-          // TODO(user): We can create a node per LinearExpressionProto instead.
-          // This will allow to reuse node between constraint, if they share a
-          // common expression.
           const LinearExpressionProto& expr = constraint.lin_max().exprs(i);
-
-          local_color.push_back(expr.offset());
-          const int local_node = new_node(local_color);
-          local_color.pop_back();
-
-          for (int j = 0; j < expr.vars().size(); ++j) {
-            const int var = expr.vars(j);
-            DCHECK(RefIsPositive(var));
-            const int64_t coeff = expr.coeffs(j);
-            graph->AddArc(get_coefficient_node(var, coeff), local_node);
-          }
-
-          graph->AddArc(local_node, target_node);
+          graph->AddArc(shared_linear_expr_node(expr), target_node);
         }
 
         break;
       }
       case ConstraintProto::kInterval: {
-        // We create 3 constraint nodes (for start, size and end) including the
-        // offset. We connect these to their terms like for a linear constraint.
-        std::vector<int> nodes;
-        for (int indicator = 0; indicator <= 2; ++indicator) {
-          const LinearExpressionProto& expr =
-              indicator == 0   ? constraint.interval().start()
-              : indicator == 1 ? constraint.interval().size()
-                               : constraint.interval().end();
-
+        static constexpr int kFixedIntervalColor = 0;
+        static constexpr int kNonFixedIntervalColor = 1;
+        if (IsIntervalFixedSize(constraint.interval())) {
           std::vector<int64_t> local_color = color;
-          local_color.push_back(indicator);
-          local_color.push_back(expr.offset());
-          const int local_node = new_node(local_color);
-          nodes.push_back(local_node);
+          local_color.push_back(kFixedIntervalColor);
+          local_color.push_back(constraint.interval().size().offset());
+          const int full_node =
+              make_linear_expr_node(constraint.interval().start(), local_color);
+          CHECK_EQ(full_node, constraint_node);
+        } else {
+          // We create 3 constraint nodes (for start, size and end) including
+          // the offset. We connect these to their terms like for a linear
+          // constraint.
+          std::vector<int64_t> local_color = color;
+          local_color.push_back(kNonFixedIntervalColor);
 
-          for (int i = 0; i < expr.vars().size(); ++i) {
-            const int ref = expr.vars(i);
-            const int var_node = PositiveRef(ref);
-            const int64_t coeff =
-                RefIsPositive(ref) ? expr.coeffs(i) : -expr.coeffs(i);
-            graph->AddArc(get_coefficient_node(var_node, coeff), local_node);
-          }
+          local_color.push_back(0);
+          const int start_node =
+              make_linear_expr_node(constraint.interval().start(), local_color);
+          local_color.pop_back();
+          CHECK_EQ(start_node, constraint_node);
+
+          // We can use a shared node for one of the three. Let's use the size
+          // since it has the most chance of being reused.
+          const int size_node =
+              shared_linear_expr_node(constraint.interval().size());
+
+          local_color.push_back(1);
+          const int end_node =
+              make_linear_expr_node(constraint.interval().end(), local_color);
+          local_color.pop_back();
+
+          // Make sure that if one node is mapped to another one, its other two
+          // components are the same.
+          graph->AddArc(start_node, end_node);
+          graph->AddArc(end_node, size_node);
         }
-
-        // We will only map enforcement literal to the start_node below because
-        // it has the same index as the constraint_node.
         interval_constraint_index_to_node[constraint_index] = constraint_node;
-        CHECK_EQ(nodes[0], constraint_node);
-
-        // Make sure that if one node is mapped to another one, its other two
-        // components are the same.
-        graph->AddArc(nodes[0], nodes[1]);
-        graph->AddArc(nodes[1], nodes[2]);
-        graph->AddArc(nodes[2], nodes[0]);  // TODO(user): not needed?
         break;
       }
       case ConstraintProto::kNoOverlap: {
@@ -414,21 +491,76 @@ std::unique_ptr<Graph> GenerateGraphForSymmetryDetection(
         // Note(user): This require that intervals appear before they are used.
         // We currently enforce this at validation, otherwise we need two passes
         // here and in a bunch of other places.
-        //
-        // TODO(user): With this graph encoding, we loose the symmetry that the
-        // dimension x can be swapped with the dimension y. I think it is
-        // possible to encode this by creating two extra nodes X and
-        // Y, each connected to all the x and all the y, but I have to think
-        // more about it.
         CHECK_EQ(constraint_node, new_node(color));
+        std::vector<int64_t> local_color = color;
+        local_color.push_back(0);
         const int size = constraint.no_overlap_2d().x_intervals().size();
+        const int node_x = new_node(local_color);
+        const int node_y = new_node(local_color);
+        local_color.pop_back();
+        graph->AddArc(constraint_node, node_x);
+        graph->AddArc(constraint_node, node_y);
+        local_color.push_back(1);
         for (int i = 0; i < size; ++i) {
+          const int box_node = new_node(local_color);
+          graph->AddArc(box_node, constraint_node);
           const int x = constraint.no_overlap_2d().x_intervals(i);
           const int y = constraint.no_overlap_2d().y_intervals(i);
-          graph->AddArc(interval_constraint_index_to_node.at(x),
-                        constraint_node);
-          graph->AddArc(interval_constraint_index_to_node.at(x),
-                        interval_constraint_index_to_node.at(y));
+          graph->AddArc(interval_constraint_index_to_node.at(x), node_x);
+          graph->AddArc(interval_constraint_index_to_node.at(x), box_node);
+          graph->AddArc(interval_constraint_index_to_node.at(y), node_y);
+          graph->AddArc(interval_constraint_index_to_node.at(y), box_node);
+        }
+        break;
+      }
+      case ConstraintProto::kCumulative: {
+        // Note(user): This require that intervals appear before they are used.
+        // We currently enforce this at validation, otherwise we need two passes
+        // here and in a bunch of other places.
+        const CumulativeConstraintProto& ct = constraint.cumulative();
+        std::vector<int64_t> capacity_color = color;
+        capacity_color.push_back(0);
+        CHECK_EQ(constraint_node, new_node(capacity_color));
+        graph->AddArc(constraint_node,
+                      make_linear_expr_node(ct.capacity(), capacity_color));
+
+        std::vector<int64_t> task_color = color;
+        task_color.push_back(1);
+        for (int i = 0; i < ct.intervals().size(); ++i) {
+          const int task_node =
+              make_linear_expr_node(ct.demands(i), task_color);
+          graph->AddArc(task_node, constraint_node);
+          graph->AddArc(task_node,
+                        interval_constraint_index_to_node.at(ct.intervals(i)));
+        }
+        break;
+      }
+      case ConstraintProto::kCircuit: {
+        // Note that this implementation will generate the same graph for a
+        // circuit constraint with two disconnected components and two circuit
+        // constraints with one component each.
+        const int num_arcs = constraint.circuit().literals().size();
+        absl::flat_hash_map<int, int> circuit_node_to_symmetry_node;
+        std::vector<int64_t> arc_color = color;
+        arc_color.push_back(1);
+        for (int i = 0; i < num_arcs; ++i) {
+          const int literal = constraint.circuit().literals(i);
+          const int tail = constraint.circuit().tails(i);
+          const int head = constraint.circuit().heads(i);
+          const int arc_node = new_node(arc_color);
+          if (!circuit_node_to_symmetry_node.contains(head)) {
+            circuit_node_to_symmetry_node[head] = new_node(color);
+          }
+          const int head_node = circuit_node_to_symmetry_node[head];
+          if (!circuit_node_to_symmetry_node.contains(tail)) {
+            circuit_node_to_symmetry_node[tail] = new_node(color);
+          }
+          const int tail_node = circuit_node_to_symmetry_node[tail];
+          // To make the graph directed, we add two arcs on the head but not on
+          // the tail.
+          graph->AddArc(tail_node, arc_node);
+          graph->AddArc(arc_node, get_literal_node(literal));
+          graph->AddArc(arc_node, head_node);
         }
         break;
       }
@@ -609,6 +741,31 @@ void FindCpModelSymmetries(
   }
 }
 
+namespace {
+
+void LogOrbitInformation(absl::Span<const int> var_to_orbit_index,
+                         SolverLogger* logger) {
+  if (logger == nullptr || !logger->LoggingIsEnabled()) return;
+
+  int num_touched_vars = 0;
+  std::vector<int> orbit_sizes;
+  for (int var = 0; var < var_to_orbit_index.size(); ++var) {
+    const int rep = var_to_orbit_index[var];
+    if (rep == -1) continue;
+    if (rep >= orbit_sizes.size()) orbit_sizes.resize(rep + 1, 0);
+    ++num_touched_vars;
+    orbit_sizes[rep]++;
+  }
+  std::sort(orbit_sizes.begin(), orbit_sizes.end(), std::greater<int>());
+  const int num_orbits = orbit_sizes.size();
+  if (num_orbits > 10) orbit_sizes.resize(10);
+  SOLVER_LOG(logger, "[Symmetry] ", num_orbits, " orbits on ", num_touched_vars,
+             " variables with sizes: ", absl::StrJoin(orbit_sizes, ","),
+             (num_orbits > orbit_sizes.size() ? ",..." : ""));
+}
+
+}  // namespace
+
 void DetectAndAddSymmetryToProto(const SatParameters& params,
                                  CpModelProto* proto, SolverLogger* logger) {
   SymmetryProto* symmetry = proto->mutable_symmetry();
@@ -616,11 +773,20 @@ void DetectAndAddSymmetryToProto(const SatParameters& params,
 
   std::vector<std::unique_ptr<SparsePermutation>> generators;
   FindCpModelSymmetries(params, *proto, &generators,
-                        /*deterministic_limit=*/1.0, logger);
+                        params.symmetry_detection_deterministic_time_limit(),
+                        logger);
   if (generators.empty()) {
     proto->clear_symmetry();
     return;
   }
+
+  // Log orbit information.
+  //
+  // TODO(user): It might be nice to just add this to the proto rather than
+  // re-reading the generators and recomputing this in a few places.
+  const int num_vars = proto->variables().size();
+  const std::vector<int> orbits = GetOrbits(num_vars, generators);
+  LogOrbitInformation(orbits, logger);
 
   for (const std::unique_ptr<SparsePermutation>& perm : generators) {
     SparsePermutationProto* perm_proto = symmetry->add_permutations();
@@ -664,7 +830,7 @@ namespace {
 // TODO(user): The same reasonning can be done if fixing the variable to
 // zero leads to many propagations at one. For general variables, we might be
 // able to do something too.
-void OrbitAndPropagation(const std::vector<int>& orbits, int var,
+void OrbitAndPropagation(absl::Span<const int> orbits, int var,
                          std::vector<int>* can_be_fixed_to_false,
                          PresolveContext* context) {
   // Note that if a variable is fixed in the orbit, then everything should be
@@ -719,6 +885,52 @@ void OrbitAndPropagation(const std::vector<int>& orbits, int var,
   }
 }
 
+std::vector<int64_t> BuildInequalityCoeffsForOrbitope(
+    absl::Span<const int64_t> maximum_values, int64_t max_linear_size,
+    bool* is_approximated) {
+  std::vector<int64_t> out(maximum_values.size());
+  int64_t range_product = 1;
+  uint64_t greatest_coeff = 0;
+  for (int i = 0; i < maximum_values.size(); ++i) {
+    out[i] = range_product;
+    greatest_coeff =
+        std::max(greatest_coeff, static_cast<uint64_t>(maximum_values[i]));
+    range_product = CapProd(range_product, 1 + maximum_values[i]);
+  }
+
+  if (range_product <= max_linear_size) {
+    // The product of all ranges fit in a int64_t. This is good news, that
+    // means we can interpret each row of the matrix as an integer in a
+    // mixed-radix representation and impose row[i] <= row[i+1].
+    *is_approximated = false;
+    return out;
+  }
+  *is_approximated = true;
+
+  const auto compute_approximate_coeffs =
+      [max_linear_size, maximum_values](double scaling_factor,
+                                        std::vector<int64_t>* coeffs) -> bool {
+    int64_t max_size = 0;
+    double cumulative_product_double = 1.0;
+    for (int i = 0; i < maximum_values.size(); ++i) {
+      const int64_t max = maximum_values[i];
+      const int64_t coeff = static_cast<int64_t>(cumulative_product_double);
+      (*coeffs)[i] = coeff;
+      cumulative_product_double *= scaling_factor * max + 1;
+      max_size = CapAdd(max_size, CapProd(max, coeff));
+      if (max_size > max_linear_size) return false;
+    }
+    return true;
+  };
+
+  const double scaling = BinarySearch<double>(
+      0.0, 1.0, [&compute_approximate_coeffs, &out](double scaling_factor) {
+        return compute_approximate_coeffs(scaling_factor, &out);
+      });
+  CHECK(compute_approximate_coeffs(scaling, &out));
+  return out;
+}
+
 }  // namespace
 
 bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
@@ -756,8 +968,10 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
   }
 
   std::vector<std::unique_ptr<SparsePermutation>> generators;
-  FindCpModelSymmetries(params, proto, &generators,
-                        /*deterministic_limit=*/1.0, context->logger());
+  FindCpModelSymmetries(
+      params, proto, &generators,
+      context->params().symmetry_detection_deterministic_time_limit(),
+      context->logger());
 
   // Remove temporary affine relation.
   context->working_model->mutable_constraints()->DeleteSubrange(
@@ -781,7 +995,7 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
     }
   }
 
-  // We have a few heuristics. The firsts only look at the gobal orbits under
+  // We have a few heuristics. The first only look at the global orbits under
   // the symmetry group and try to infer Boolean variable fixing via symmetry
   // breaking. Note that nothing is fixed yet, we will decide later if we fix
   // these Booleans or not.
@@ -792,10 +1006,12 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
   const std::vector<int> orbits = GetOrbits(num_vars, generators);
   std::vector<int> orbit_sizes;
   int max_orbit_size = 0;
+  int sum_of_orbit_sizes = 0;
   for (int var = 0; var < num_vars; ++var) {
     const int rep = orbits[var];
     if (rep == -1) continue;
     if (rep >= orbit_sizes.size()) orbit_sizes.resize(rep + 1, 0);
+    ++sum_of_orbit_sizes;
     orbit_sizes[rep]++;
     if (orbit_sizes[rep] > max_orbit_size) {
       distinguished_var = var;
@@ -804,18 +1020,7 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
   }
 
   // Log orbit info.
-  if (context->logger()->LoggingIsEnabled()) {
-    std::vector<int> sorted_sizes;
-    for (const int s : orbit_sizes) {
-      if (s != 0) sorted_sizes.push_back(s);
-    }
-    std::sort(sorted_sizes.begin(), sorted_sizes.end(), std::greater<int>());
-    const int num_orbits = sorted_sizes.size();
-    if (num_orbits > 10) sorted_sizes.resize(10);
-    SOLVER_LOG(context->logger(), "[Symmetry] ", num_orbits,
-               " orbits with sizes: ", absl::StrJoin(sorted_sizes, ","),
-               (num_orbits > sorted_sizes.size() ? ",..." : ""));
-  }
+  LogOrbitInformation(orbits, context->logger());
 
   // First heuristic based on propagation, see the function comment.
   if (max_orbit_size > 2) {
@@ -829,11 +1034,12 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
   // literal, and maximize the number of fixing.
   //
   // TODO(user): Doing that is not always good, on cod105.mps, fixing variables
-  // instead of letting the innner solver handle Boolean symmetries make the
+  // instead of letting the inner solver handle Boolean symmetries make the
   // problem unsolvable instead of easily solved. This is probably because this
-  // fixing do not exploit the full structure of these symmeteries. Note
+  // fixing do not exploit the full structure of these symmetries. Note
   // however that the fixing via propagation above close cod105 even more
   // efficiently.
+  std::vector<int> var_can_be_true_per_orbit(num_vars, -1);
   {
     std::vector<int> tmp_to_clear;
     std::vector<int> tmp_sizes(num_vars, 0);
@@ -874,7 +1080,11 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
           }
 
           // We push all but the first one in each orbit.
-          if (tmp_sizes[rep] == 0) can_be_fixed_to_false.push_back(var);
+          if (tmp_sizes[rep] == 0) {
+            can_be_fixed_to_false.push_back(var);
+          } else {
+            var_can_be_true_per_orbit[rep] = var;
+          }
           tmp_sizes[rep] = 0;
         }
       } else {
@@ -955,7 +1165,7 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
     }
   }
 
-  // Supper simple heuristic to use the orbitope or not.
+  // Super simple heuristic to use the orbitope or not.
   //
   // In an orbitope with an at most one on each row, we can fix the upper right
   // triangle. We could use a formula, but the loop is fast enough.
@@ -964,13 +1174,35 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
   // iterate!
   int max_num_fixed_in_orbitope = 0;
   if (!orbitope.empty()) {
-    const int num_rows = orbitope[0].size();
-    int size_left = num_rows;
+    int size_left = orbitope[0].size();
     for (int col = 0; size_left > 1 && col < orbitope.size(); ++col) {
       max_num_fixed_in_orbitope += size_left - 1;
       --size_left;
     }
   }
+
+  // Fixing just a few variables to break large symmetry can be really bad. See
+  // for example cdc7-4-3-2.pb.gz where we don't find solution if we do that. On
+  // the other hand, enabling this make it worse on neos-3083784-nive.pb.gz.
+  //
+  // In general, enabling this works better in single thread with max_lp_sym,
+  // but worse in multi-thread, where less workers are using symmetries, and so
+  // it is better to fix more stuff.
+  //
+  // TODO(user): Tune more, especially as we handle symmetry better. Also the
+  // estimate is pretty bad, we should probably compute stabilizer and decide
+  // when we actually know how much we can fix compared to how many symmetry we
+  // lose.
+  const int num_fixable =
+      std::max<int>(max_num_fixed_in_orbitope, can_be_fixed_to_false.size());
+  if (/* DISABLES CODE */ (false) && !can_be_fixed_to_false.empty() &&
+      100 * num_fixable < sum_of_orbit_sizes) {
+    SOLVER_LOG(context->logger(),
+               "[Symmetry] Not fixing anything as gain seems too small.");
+    return true;
+  }
+
+  // Fix "can_be_fixed_to_false" instead of the orbitope if it is larger.
   if (max_num_fixed_in_orbitope < can_be_fixed_to_false.size()) {
     const int orbit_index = orbits[distinguished_var];
     int num_in_orbit = 0;
@@ -978,6 +1210,18 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
       const int var = can_be_fixed_to_false[i];
       if (orbits[var] == orbit_index) ++num_in_orbit;
       context->UpdateRuleStats("symmetry: fixed to false in general orbit");
+      if (var_can_be_true_per_orbit[orbits[var]] != -1) {
+        // We are breaking the symmetry in a way that makes the hint invalid.
+        // We want `var` to be false, so we would naively pick a symmetry to
+        // enforce that. But that will be wrong if we do this twice: after we
+        // permute the hint to fix the first one we would look for a symmetry
+        // group element that fixes the second one to false. But there are many
+        // of those, and picking the wrong one would risk making the first one
+        // true again. Since this is a AMO, fixing the one that is true doesn't
+        // have this problem.
+        context->solution_crush().MaybeUpdateVarWithSymmetriesToValue(
+            var_can_be_true_per_orbit[orbits[var]], true, generators);
+      }
       if (!context->SetLiteralToFalse(var)) return false;
     }
 
@@ -1021,72 +1265,77 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
     }
   }
 
-  while (!orbitope.empty() && orbitope[0].size() > 1) {
+  if (!orbitope.empty() && orbitope[0].size() > 1) {
     const int num_cols = orbitope[0].size();
-    const std::vector<int> orbits = GetOrbitopeOrbits(num_vars, orbitope);
+    const std::vector<int> orbitope_orbits =
+        GetOrbitopeOrbits(num_vars, orbitope);
+
+    // Using the orbitope orbits and intersecting at most ones, we will be able
+    // in some case to derive a property of the literals of one row of the
+    // orbitope. Namely that:
+    // - All literals of that row take the same value.
+    // - At most one literal can be true.
+    // - At most one literal can be false.
+    //
+    // See the comment below for how we can infer this.
+    const int num_rows = orbitope.size();
+    std::vector<bool> row_is_all_equivalent(num_rows, false);
+    std::vector<bool> row_has_at_most_one_true(num_rows, false);
+    std::vector<bool> row_has_at_most_one_false(num_rows, false);
 
     // Because in the orbitope case, we have a full symmetry group of the
     // columns, we can infer more than just using the orbits under a general
     // permutation group. If an at most one contains two variables from the
-    // orbit, we can infer:
+    // row, we can infer:
     // 1/ If the two variables appear positively, then there is an at most one
-    //    on the full orbit, and we can set n - 1 variables to zero to break the
+    //    on the full row, and we can set n - 1 variables to zero to break the
     //    symmetry.
     // 2/ If the two variables appear negatively, then the opposite situation
-    //    arise and there is at most one zero on the orbit, we can set n - 1
+    //    arise and there is at most one zero on the row, we can set n - 1
     //    variables to one.
     // 3/ If two literals of opposite sign appear, then the only possibility
-    //    for the orbit are all at one or all at zero, thus we can mark all
+    //    for the row are all at one or all at zero, thus we can mark all
     //    variables as equivalent.
     //
     // These property comes from the fact that when we permute a line of the
     // orbitope in any way, then the position than ends up in the at most one
     // must never be both at one.
     //
-    // Note that 1/ can be done without breaking any symmetry, but for 2/ and 3/
-    // by choosing which variable is not fixed, we will break some symmetry, and
-    // we will need to update the orbitope to stabilize this choice before
-    // continuing.
+    // Note that 3/ can be done without breaking any symmetry, but for 1/ and 2/
+    // by choosing which variable is not fixed, we will break some symmetry.
     //
-    // TODO(user): for 2/ and 3/ we could add an at most one constraint on the
-    // full orbit if it is not already there!
+    // TODO(user): for 1/ and 2/ we could add an at most one constraint on the
+    // full row if it is not already there!
     //
-    // Note(user): On the miplib, only 1/ happens currently. Not sure with LNS
-    // though.
-    std::vector<bool> all_equivalent_rows(orbitope.size(), false);
-
-    // The result described above can be generalized if an at most one intersect
-    // many of the orbitope rows, each in at leat two positions. We will track
-    // the set of best rows on which we have an at most one (or at most one
-    // zero) on all their entries.
-    bool at_most_one_in_best_rows;  // The alternative is at most one zero.
-    int64_t best_score = 0;
-    std::vector<int> best_rows;
-
-    std::vector<int> rows_in_at_most_one;
+    // Note(user): On the miplib, only 1/ and 2/ happens currently. Not sure
+    // with LNS though.
     for (const google::protobuf::RepeatedField<int32_t>* literals :
          at_most_ones) {
       tmp_to_clear.clear();
       for (const int literal : *literals) {
         if (context->IsFixed(literal)) continue;
         const int var = PositiveRef(literal);
-        const int rep = orbits[var];
-        if (rep == -1) continue;
+        const int row = orbitope_orbits[var];
+        if (row == -1) continue;
 
-        if (tmp_sizes[rep] == 0) tmp_to_clear.push_back(rep);
-        tmp_sizes[rep]++;
-        if (RefIsPositive(literal)) tmp_num_positive[rep]++;
+        if (tmp_sizes[row] == 0) tmp_to_clear.push_back(row);
+        tmp_sizes[row]++;
+        if (RefIsPositive(literal)) tmp_num_positive[row]++;
       }
 
-      int num_positive_direction = 0;
-      int num_negative_direction = 0;
-
-      // An at most one touching two positions in an orbitope row can possibly
-      // be extended, depending if it has singleton intersection swith other
-      // rows and where.
+      // An at most one touching two positions in an orbitope row can be
+      // extended to include the full row.
+      //
+      // Note(user): I am not sure we care about that here. By symmetry, if we
+      // have an at most one touching two positions, then we should have others
+      // touching all pair of positions. And the at most one expansion would
+      // already have extended it. So this is more FYI.
       bool possible_extension = false;
 
-      rows_in_at_most_one.clear();
+      // TODO(user): if the same at most one touch more than one row, we can
+      // deduce more. It is a bit tricky and maybe not frequent enough to make a
+      // big difference. Also, as we start to fix things, at most one might
+      // propagate by themselves.
       for (const int row : tmp_to_clear) {
         const int size = tmp_sizes[row];
         const int num_positive = tmp_num_positive[row];
@@ -1094,16 +1343,15 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
         tmp_sizes[row] = 0;
         tmp_num_positive[row] = 0;
 
+        if (num_positive > 0 && num_negative > 0) {
+          row_is_all_equivalent[row] = true;
+        }
         if (num_positive > 1 && num_negative == 0) {
           if (size < num_cols) possible_extension = true;
-          rows_in_at_most_one.push_back(row);
-          ++num_positive_direction;
+          row_has_at_most_one_true[row] = true;
         } else if (num_positive == 0 && num_negative > 1) {
           if (size < num_cols) possible_extension = true;
-          rows_in_at_most_one.push_back(row);
-          ++num_negative_direction;
-        } else if (num_positive > 0 && num_negative > 0) {
-          all_equivalent_rows[row] = true;
+          row_has_at_most_one_false[row] = true;
         }
       }
 
@@ -1111,109 +1359,141 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
         context->UpdateRuleStats(
             "TODO symmetry: possible at most one extension.");
       }
-
-      if (num_positive_direction > 0 && num_negative_direction > 0) {
-        return context->NotifyThatModelIsUnsat("Symmetry and at most ones");
-      }
-      const bool direction = num_positive_direction > 0;
-
-      // Because of symmetry, the choice of the column shouldn't matter (they
-      // will all appear in the same number of constraints of the same types),
-      // however we prefer to fix the variables that seems to touch more
-      // constraints.
-      //
-      // TODO(user): maybe we should simplify the constraint using the variable
-      // we fix before choosing the next row to break symmetry on. If there are
-      // multiple row involved, we could also take the intersection instead of
-      // probably counting the same constraints more than once.
-      int64_t score = 0;
-      for (const int row : rows_in_at_most_one) {
-        score +=
-            context->VarToConstraints(PositiveRef(orbitope[row][0])).size();
-      }
-      if (score > best_score) {
-        at_most_one_in_best_rows = direction;
-        best_score = score;
-        best_rows = rows_in_at_most_one;
-      }
     }
 
-    // Mark all the equivalence.
+    // List the row in "at most one" by score. We will be able to fix a
+    // "triangle" of literals in order to break some of the symmetry.
+    std::vector<std::pair<int, int64_t>> rows_by_score;
+
+    // Mark all the equivalence or fixed rows.
     // Note that this operation do not change the symmetry group.
     //
     // TODO(user): We could remove these rows from the orbitope. Note that
     // currently this never happen on the miplib (maybe in LNS though).
-    for (int i = 0; i < all_equivalent_rows.size(); ++i) {
-      if (all_equivalent_rows[i]) {
-        for (int j = 1; j < num_cols; ++j) {
-          context->StoreBooleanEqualityRelation(orbitope[i][0], orbitope[i][j]);
-          context->UpdateRuleStats("symmetry: all equivalent in orbit");
+    for (int i = 0; i < num_rows; ++i) {
+      if (row_has_at_most_one_true[i] && row_has_at_most_one_false[i]) {
+        // If we have both property, it means we have
+        // - sum_j orbitope[row][j] <= 1
+        // - sum_j not(orbitope[row][j]) <= 1 which is the same as
+        //   sum_j orbitope[row][j] >= num_cols - 1.
+        // This is only possible if we have two elements and we don't have
+        // row_is_all_equivalent.
+        if (num_cols == 2 && !row_is_all_equivalent[i]) {
+          // We have [1, 0] or [0, 1].
+          context->UpdateRuleStats("symmetry: equivalence in orbitope row");
+          if (!context->StoreBooleanEqualityRelation(
+                  orbitope[i][0], NegatedRef(orbitope[i][1]))) {
+            return false;
+          }
           if (context->ModelIsUnsat()) return false;
-        }
-      }
-    }
-
-    // Break the symmetry on our set of best rows by picking one columns
-    // and setting all the other entries to zero or one. Note that the at most
-    // one applies to all entries in all rows.
-    //
-    // TODO(user): We don't have any at most one relation on this orbitope,
-    // but we could still add symmetry breaking inequality by picking any matrix
-    // entry and making it the largest/lowest value on its row. This also work
-    // for non-Booleans.
-    if (best_score == 0) {
-      context->UpdateRuleStats(
-          "TODO symmetry: add symmetry breaking inequalities?");
-      break;
-    }
-
-    // If our symmetry group is valid, they cannot be any variable already
-    // fixed to one (or zero if !at_most_one_in_best_rows). Otherwise all would
-    // be fixed to one and the problem would be unsat.
-    for (const int i : best_rows) {
-      for (int j = 0; j < num_cols; ++j) {
-        const int var = orbitope[i][j];
-        if ((at_most_one_in_best_rows && context->LiteralIsTrue(var)) ||
-            (!at_most_one_in_best_rows && context->LiteralIsFalse(var))) {
-          return context->NotifyThatModelIsUnsat("Symmetry and at most one");
-        }
-      }
-    }
-
-    // We have an at most one on a set of rows, we will pick a column, and set
-    // all other entries on these rows to zero.
-    //
-    // TODO(user): All choices should be equivalent, but double check?
-    const int best_col = 0;
-    for (const int i : best_rows) {
-      for (int j = 0; j < num_cols; ++j) {
-        if (j == best_col) continue;
-        const int var = orbitope[i][j];
-        if (at_most_one_in_best_rows) {
-          context->UpdateRuleStats("symmetry: fixed to false");
-          if (!context->SetLiteralToFalse(var)) return false;
         } else {
-          context->UpdateRuleStats("symmetry: fixed to true");
-          if (!context->SetLiteralToTrue(var)) return false;
+          // No solution.
+          return context->NotifyThatModelIsUnsat("orbitope and at most one");
+        }
+        continue;
+      }
+
+      if (row_is_all_equivalent[i]) {
+        // Here we proved that the row is either all ones or all zeros.
+        // This was because we had:
+        //   at_most_one = [x, ~y, ...]
+        //   orbitope = [x, y, ...]
+        // and by symmetry we have
+        //   at_most_one = [~x, y, ...]
+        // This for all pairs of positions in that row.
+        if (row_has_at_most_one_false[i]) {
+          context->UpdateRuleStats("symmetry: all true in orbitope row");
+          for (int j = 0; j < num_cols; ++j) {
+            if (!context->SetLiteralToTrue(orbitope[i][j])) return false;
+          }
+        } else if (row_has_at_most_one_true[i]) {
+          context->UpdateRuleStats("symmetry: all false in orbitope row");
+          for (int j = 0; j < num_cols; ++j) {
+            if (!context->SetLiteralToFalse(orbitope[i][j])) return false;
+          }
+        } else {
+          context->UpdateRuleStats("symmetry: all equivalent in orbitope row");
+          for (int j = 1; j < num_cols; ++j) {
+            if (!context->StoreBooleanEqualityRelation(orbitope[i][0],
+                                                       orbitope[i][j])) {
+              return false;
+            }
+            if (context->ModelIsUnsat()) return false;
+          }
+        }
+        continue;
+      }
+
+      // We use as the score the number of constraint in which variables from
+      // this row participate.
+      const int64_t score =
+          context->VarToConstraints(PositiveRef(orbitope[i][0])).size();
+      if (row_has_at_most_one_true[i]) {
+        rows_by_score.push_back({i, score});
+      } else if (row_has_at_most_one_false[i]) {
+        rows_by_score.push_back({i, score});
+      }
+    }
+
+    // Break the symmetry by fixing at each step all but one literal to true or
+    // false. Note that each time we do that for a row, we need to exclude the
+    // non-fixed column from the rest of the row processing. We thus fix a
+    // "triangle" of literals.
+    //
+    // This is the same as ordering the columns in some lexicographic order and
+    // using the at_most_ones to fix known position. Note that we can still add
+    // lexicographic symmetry breaking inequality on the columns as long as we
+    // do that in the same order as these fixing.
+    absl::c_stable_sort(rows_by_score, [](const std::pair<int, int64_t>& p1,
+                                          const std::pair<int, int64_t>& p2) {
+      return p1.second > p2.second;
+    });
+    int num_processed_rows = 0;
+    for (const auto [row, score] : rows_by_score) {
+      if (num_processed_rows + 1 >= num_cols) break;
+      ++num_processed_rows;
+      if (row_has_at_most_one_true[row]) {
+        context->UpdateRuleStats(
+            "symmetry: fixed all but one to false in orbitope row");
+        for (int j = num_processed_rows; j < num_cols; ++j) {
+          if (!context->SetLiteralToFalse(orbitope[row][j])) return false;
+        }
+      } else {
+        CHECK(row_has_at_most_one_false[row]);
+        context->UpdateRuleStats(
+            "symmetry: fixed all but one to true in orbitope row");
+        for (int j = num_processed_rows; j < num_cols; ++j) {
+          if (!context->SetLiteralToTrue(orbitope[row][j])) return false;
         }
       }
     }
 
-    // Remove all best rows.
-    for (const int i : best_rows) orbitope[i].clear();
-    int new_size = 0;
-    for (int i = 0; i < orbitope.size(); ++i) {
-      if (!orbitope[i].empty()) orbitope[new_size++] = orbitope[i];
-    }
-    CHECK_LT(new_size, orbitope.size());
-    orbitope.resize(new_size);
+    // For correctness of the code below, reduce the orbitope.
+    //
+    // TODO(user): This is probably not needed if we add lexicographic
+    // constraint instead of just breaking a single row below.
+    if (num_processed_rows > 0) {
+      // Remove the first num_processed_rows.
+      int new_size = 0;
+      for (int i = num_processed_rows; i < orbitope.size(); ++i) {
+        orbitope[new_size++] = std::move(orbitope[i]);
+      }
+      CHECK_LT(new_size, orbitope.size());
+      orbitope.resize(new_size);
 
-    // Remove best_col.
-    for (int i = 0; i < orbitope.size(); ++i) {
-      std::swap(orbitope[i][best_col], orbitope[i].back());
-      orbitope[i].pop_back();
+      // For each of them remove the first num_processed_rows entries.
+      for (int i = 0; i < orbitope.size(); ++i) {
+        CHECK_LT(num_processed_rows, orbitope[i].size());
+        orbitope[i].erase(orbitope[i].begin(),
+                          orbitope[i].begin() + num_processed_rows);
+      }
     }
   }
+
+  // The transformations below seems to hurt more than what they help.
+  // Especially when we handle symmetry during the search like with max_lp_sym
+  // worker. See for instance neos-948346.pb or map06.pb.gz.
+  if (params.symmetry_level() <= 3) return true;
 
   // If we are left with a set of variable than can all be permuted, lets
   // break the symmetry by ordering them.
@@ -1239,6 +1519,221 @@ bool DetectAndExploitSymmetriesInPresolve(PresolveContext* context) {
       context->UpdateRuleStats("symmetry: added symmetry breaking inequality");
     }
     context->UpdateNewConstraintsVariableUsage();
+  } else if (orbitope.size() > 1) {
+    std::vector<int64_t> max_values(orbitope.size());
+    for (int i = 0; i < orbitope.size(); ++i) {
+      const int var = orbitope[i][0];
+      const int64_t max = std::max(std::abs(context->MaxOf(var)),
+                                   std::abs(context->MinOf(var)));
+      max_values[i] = max;
+    }
+    constexpr int kMaxBits = 60;
+    bool is_approximated;
+    const std::vector<int64_t> coeffs = BuildInequalityCoeffsForOrbitope(
+        max_values, (int64_t{1} << kMaxBits), &is_approximated);
+    for (int i = 0; i + 1 < orbitope[0].size(); ++i) {
+      ConstraintProto* ct = context->working_model->add_constraints();
+      auto* arg = ct->mutable_linear();
+      for (int j = 0; j < orbitope.size(); ++j) {
+        const int64_t coeff = coeffs[j];
+        arg->add_vars(orbitope[j][i + 1]);
+        arg->add_coeffs(coeff);
+        arg->add_vars(orbitope[j][i]);
+        arg->add_coeffs(-coeff);
+        DCHECK_EQ(context->MaxOf(orbitope[j][i + 1]),
+                  context->MaxOf(orbitope[j][i]));
+        DCHECK_EQ(context->MinOf(orbitope[j][i + 1]),
+                  context->MinOf(orbitope[j][i]));
+      }
+      arg->add_domain(0);
+      arg->add_domain(std::numeric_limits<int64_t>::max());
+      DCHECK(!PossibleIntegerOverflow(*context->working_model, arg->vars(),
+                                      arg->coeffs()));
+    }
+    context->UpdateRuleStats(
+        absl::StrCat("symmetry: added linear ",
+                     is_approximated ? "approximated " : "",
+                     "inequality ordering orbitope columns"),
+        orbitope[0].size());
+    context->UpdateNewConstraintsVariableUsage();
+    return true;
+  }
+
+  return true;
+}
+
+namespace {
+
+std::vector<absl::Span<int>> GetCyclesAsSpan(
+    SparsePermutationProto& permutation) {
+  std::vector<absl::Span<int>> result;
+  int start = 0;
+  const int num_cycles = permutation.cycle_sizes().size();
+  for (int i = 0; i < num_cycles; ++i) {
+    const int size = permutation.cycle_sizes(i);
+    result.push_back(
+        absl::MakeSpan(&permutation.mutable_support()->at(start), size));
+    start += size;
+  }
+  return result;
+}
+
+}  // namespace
+
+bool FilterOrbitOnUnusedOrFixedVariables(SymmetryProto* symmetry,
+                                         PresolveContext* context) {
+  std::vector<absl::Span<int>> cycles;
+  int num_problematic_generators = 0;
+  for (SparsePermutationProto& generator : *symmetry->mutable_permutations()) {
+    // We process each cycle at once.
+    // If all variables from a cycle are fixed to the same value, this is
+    // fine and we can just remove the cycle.
+    //
+    // TODO(user): These are just basic checks and do not guarantee that we
+    // properly kept this symmetry in the presolve.
+    //
+    // TODO(user): Deal with case where all variable in an orbit has been found
+    // to be equivalent to each other. Or all variables have affine
+    // representative, like if all domains where [0][2], we should have remapped
+    // all such variable to Booleans.
+    cycles = GetCyclesAsSpan(generator);
+    bool problematic = false;
+
+    int new_num_cycles = 0;
+    const int old_num_cycles = cycles.size();
+    for (int i = 0; i < old_num_cycles; ++i) {
+      if (cycles[i].empty()) continue;
+      const int reference_var = cycles[i][0];
+      const Domain reference_domain = context->DomainOf(reference_var);
+      const AffineRelation::Relation reference_relation =
+          context->GetAffineRelation(reference_var);
+
+      int num_affine_relations = 0;
+      int num_with_same_representative = 0;
+
+      int num_fixed = 0;
+      int num_unused = 0;
+      for (const int var : cycles[i]) {
+        CHECK(RefIsPositive(var));
+        if (context->DomainOf(var) != reference_domain) {
+          context->UpdateRuleStats(
+              "TODO symmetry: different domain in symmetric variables");
+          problematic = true;
+          break;
+        }
+
+        if (context->DomainOf(var).IsFixed()) {
+          ++num_fixed;
+          continue;
+        }
+
+        // If we have affine relation, we only support the case where they
+        // are all the same.
+        const auto affine_relation = context->GetAffineRelation(var);
+        if (affine_relation == reference_relation) {
+          ++num_with_same_representative;
+        }
+        if (affine_relation.representative != var) {
+          ++num_affine_relations;
+        }
+
+        if (context->VariableIsNotUsedAnymore(var)) {
+          ++num_unused;
+          continue;
+        }
+      }
+
+      if (problematic) break;
+
+      if (num_fixed > 0) {
+        if (num_fixed != cycles[i].size()) {
+          context->UpdateRuleStats(
+              "TODO symmetry: not all variables fixed in cycle");
+          problematic = true;
+          break;
+        }
+        continue;  // We can skip this cycle
+      }
+
+      if (num_affine_relations > 0) {
+        if (num_with_same_representative != cycles[i].size()) {
+          context->UpdateRuleStats(
+              "TODO symmetry: not all variables have same representative");
+          problematic = true;
+          break;
+        }
+        continue;  // We can skip this cycle
+      }
+
+      // Note that the order matter.
+      // If all have the same representative, we don't care about this one.
+      if (num_unused > 0) {
+        if (num_unused != cycles[i].size()) {
+          context->UpdateRuleStats(
+              "TODO symmetry: not all variables unused in cycle");
+          problematic = true;
+          break;
+        }
+        continue;  // We can skip this cycle
+      }
+
+      // Lets keep this cycle.
+      cycles[new_num_cycles++] = cycles[i];
+    }
+
+    if (problematic) {
+      ++num_problematic_generators;
+      generator.clear_support();
+      generator.clear_cycle_sizes();
+      continue;
+    }
+
+    if (new_num_cycles < old_num_cycles) {
+      cycles.resize(new_num_cycles);
+      generator.clear_cycle_sizes();
+      int new_support_size = 0;
+      for (const absl::Span<int> cycle : cycles) {
+        for (const int var : cycle) {
+          generator.set_support(new_support_size++, var);
+        }
+        generator.add_cycle_sizes(cycle.size());
+      }
+      generator.mutable_support()->Truncate(new_support_size);
+    }
+  }
+
+  if (num_problematic_generators > 0) {
+    SOLVER_LOG(context->logger(), "[Symmetry] ", num_problematic_generators,
+               " generators where problematic !! Fix.");
+  }
+
+  // Lets remove empty generators.
+  int new_size = 0;
+  const int old_size = symmetry->permutations().size();
+  for (int i = 0; i < old_size; ++i) {
+    if (symmetry->permutations(i).support().empty()) continue;
+    if (new_size != i) {
+      symmetry->mutable_permutations()->SwapElements(new_size, i);
+    }
+    ++new_size;
+  }
+  if (new_size != old_size) {
+    symmetry->mutable_permutations()->DeleteSubrange(new_size,
+                                                     old_size - new_size);
+  }
+
+  // Lets output the new statistics.
+  // TODO(user): Avoid the reconvertion.
+  {
+    const int num_vars = context->working_model->variables().size();
+    std::vector<std::unique_ptr<SparsePermutation>> generators;
+    for (const SparsePermutationProto& perm : symmetry->permutations()) {
+      generators.emplace_back(CreateSparsePermutationFromProto(num_vars, perm));
+    }
+    SOLVER_LOG(context->logger(),
+               "[Symmetry] final processing #generators:", generators.size());
+    const std::vector<int> orbits = GetOrbits(num_vars, generators);
+    LogOrbitInformation(orbits, context->logger());
   }
 
   return true;

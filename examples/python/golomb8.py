@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -23,17 +23,14 @@ of the rule.
 """
 
 from absl import app
-from absl import flags
 from ortools.constraint_solver import pywrapcp
-
-FLAGS = flags.FLAGS
 
 # We disable the following warning because it is a false positive on constraints
 # like: solver.Add(x == 0)
 # pylint: disable=g-explicit-bool-comparison
 
 
-def main(_):
+def main(_) -> None:
     # Create the solver.
     solver = pywrapcp.Solver("golomb ruler")
 

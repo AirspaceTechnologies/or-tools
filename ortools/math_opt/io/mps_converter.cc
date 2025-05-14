@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -37,6 +37,12 @@ absl::StatusOr<ModelProto> ReadMpsFile(const absl::string_view filename) {
   glop::MPSReader mps_reader;
   MPModelProto mp_model;
   RETURN_IF_ERROR(mps_reader.ParseFile(filename, &mp_model));
+  return MPModelProtoToMathOptModel(mp_model);
+}
+
+absl::StatusOr<ModelProto> MpsToModelProto(absl::string_view mps_data) {
+  ASSIGN_OR_RETURN(const MPModelProto mp_model,
+                   glop::MpsDataToMPModelProto(mps_data));
   return MPModelProtoToMathOptModel(mp_model);
 }
 

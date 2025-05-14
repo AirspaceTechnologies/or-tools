@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,6 +15,8 @@
 #ifndef OR_TOOLS_UTIL_REV_H_
 #define OR_TOOLS_UTIL_REV_H_
 
+#include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -126,7 +128,7 @@ class RevVector : public ReversibleInterface {
  private:
   std::vector<int> end_of_level_;  // In stack_.
   std::vector<std::pair<IndexType, T>> stack_;
-  absl::StrongVector<IndexType, T> vector_;
+  util_intops::StrongVector<IndexType, T> vector_;
 };
 
 template <class T>

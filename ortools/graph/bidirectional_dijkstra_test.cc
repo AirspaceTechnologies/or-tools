@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -24,8 +24,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/random/distributions.h"
 #include "absl/strings/str_cat.h"
+#include "absl/types/span.h"
 #include "gtest/gtest.h"
 #include "ortools/base/gmock.h"
+#include "ortools/base/iterator_adaptors.h"
 #include "ortools/graph/bounded_dijkstra.h"
 #include "ortools/graph/graph.h"
 
@@ -141,7 +143,7 @@ TEST(BidirectionalDijkstraTest, RandomizedCorrectnessTest) {
         &forward_graph, &forward_lengths);
 
     // To print some debugging info in case the test fails.
-    auto print_arc_path = [&](const std::vector<int>& arc_path) -> std::string {
+    auto print_arc_path = [&](absl::Span<const int> arc_path) -> std::string {
       if (arc_path.empty()) return "<EMPTY>";
       std::string out = absl::StrCat(forward_graph.Tail(arc_path[0]));
       double total_length = 0.0;
@@ -154,7 +156,7 @@ TEST(BidirectionalDijkstraTest, RandomizedCorrectnessTest) {
       return out;
     };
     auto print_node_distances =
-        [&](const std::vector<Dijkstra::NodeDistance>& nds) -> std::string {
+        [&](absl::Span<const Dijkstra::NodeDistance> nds) -> std::string {
       std::string out = "{";
       for (const Dijkstra::NodeDistance& nd : nds) {
         absl::StrAppend(&out, " #", nd.node, " dist=", (nd.distance), ",");
@@ -201,7 +203,7 @@ TEST(BidirectionalDijkstraTest, RandomizedCorrectnessTest) {
           ref_dijkstra.ArcPathToNode(ref_dests[0]);
       const auto path = tested_dijkstra.SetToSetShortestPath(srcs, dsts);
       std::vector<int> arc_path = path.forward_arc_path;
-      for (const int arc : gtl::reversed_view(path.backward_arc_path)) {
+      for (const int arc : ::gtl::reversed_view(path.backward_arc_path)) {
         arc_path.push_back(forward_arc_of_backward_arc[arc]);
       }
       ASSERT_THAT(arc_path, ElementsAreArray(ref_arc_path))

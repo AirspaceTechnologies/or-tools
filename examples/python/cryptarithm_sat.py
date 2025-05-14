@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -19,7 +19,7 @@ from absl import app
 from ortools.sat.python import cp_model
 
 
-def send_more_money():
+def send_more_money() -> None:
     """solve the cryptarithmic puzzle SEND+MORE=MONEY."""
     model = cp_model.CpModel()
 
@@ -74,7 +74,7 @@ def send_more_money():
     print("y:", solver.value(y))
 
 
-def main(_):
+def main(_) -> None:
     send_more_money()
 
 

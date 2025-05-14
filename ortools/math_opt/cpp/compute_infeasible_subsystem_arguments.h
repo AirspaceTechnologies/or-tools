@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,8 +14,8 @@
 #ifndef OR_TOOLS_MATH_OPT_CPP_COMPUTE_INFEASIBLE_SUBSYSTEM_ARGUMENTS_H_
 #define OR_TOOLS_MATH_OPT_CPP_COMPUTE_INFEASIBLE_SUBSYSTEM_ARGUMENTS_H_
 
-#include "ortools/math_opt/cpp/message_callback.h"    // IWYU pragma: export
-#include "ortools/math_opt/cpp/parameters.h"          // IWYU pragma: export
+#include "ortools/math_opt/cpp/message_callback.h"  // IWYU pragma: export
+#include "ortools/math_opt/cpp/parameters.h"        // IWYU pragma: export
 #include "ortools/util/solve_interrupter.h"         // IWYU pragma: export
 
 namespace operations_research::math_opt {

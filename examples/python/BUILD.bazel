@@ -1,4 +1,4 @@
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -54,9 +54,13 @@ code_sample_test_arg_py(
     suffix = "salbp_20_1",
 )
 
+code_sample_py("maximize_combinations_sat")
+
 code_sample_py("maze_escape_sat")
 
 code_sample_py("no_wait_baking_scheduling_sat")
+
+code_sample_py("pell_equation_sat")
 
 code_sample_py("pentominoes_sat")
 
@@ -95,6 +99,8 @@ code_sample_py("sudoku_sat")
 code_sample_py("task_allocation_sat")
 
 code_sample_py("tasks_and_workers_assignment_sat")
+
+code_sample_py("test_scheduling_sat")
 
 code_sample_py("tsp_sat")
 

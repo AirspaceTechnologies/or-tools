@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -85,7 +85,8 @@ struct BopConstraintTerm {
     return search_id < other.search_id;
   }
 };
-typedef absl::StrongVector<SparseIndex, BopConstraintTerm> BopConstraintTerms;
+typedef util_intops::StrongVector<SparseIndex, BopConstraintTerm>
+    BopConstraintTerms;
 
 }  // namespace bop
 }  // namespace operations_research

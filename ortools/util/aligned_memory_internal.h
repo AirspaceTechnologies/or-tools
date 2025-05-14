@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,6 +15,7 @@
 #define OR_TOOLS_UTIL_ALIGNED_MEMORY_INTERNAL_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 
@@ -45,7 +46,11 @@ struct AllocatorWithAlignment : public std::allocator<T> {
         MathUtil::RoundUpTo(num_required_bytes, alignment_bytes);
 
     std::uintptr_t ptr = reinterpret_cast<std::uintptr_t>(
+#if !defined(_MSC_VER)
         std::aligned_alloc(alignment_bytes, num_allocated_bytes));
+#else
+        _aligned_malloc(alignment_bytes, num_allocated_bytes));
+#endif
     return reinterpret_cast<T*>(ptr + misalignment_bytes);
   }
   // A version of allocate() that takes a hint; we just ignore the hint.

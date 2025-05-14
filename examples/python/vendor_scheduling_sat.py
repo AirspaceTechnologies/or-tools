@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -63,7 +63,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         return self.__solution_count
 
 
-def vendor_scheduling_sat():
+def vendor_scheduling_sat() -> None:
     """Create the shift scheduling model and solve it."""
     # Create the model.
     model = cp_model.CpModel()

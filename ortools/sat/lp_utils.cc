@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -36,7 +36,7 @@
 #include "ortools/sat/boolean_problem.pb.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_utils.h"
-#include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/sat_parameters.pb.h"
 #include "ortools/util/fp_utils.h"
 #include "ortools/util/logging.h"
@@ -57,7 +57,7 @@ using operations_research::MPVariableProto;
 
 namespace {
 
-void ScaleConstraint(const std::vector<double>& var_scaling,
+void ScaleConstraint(absl::Span<const double> var_scaling,
                      MPConstraintProto* mp_constraint) {
   const int num_terms = mp_constraint->coefficient_size();
   for (int i = 0; i < num_terms; ++i) {
@@ -67,7 +67,7 @@ void ScaleConstraint(const std::vector<double>& var_scaling,
   }
 }
 
-void ApplyVarScaling(const std::vector<double>& var_scaling,
+void ApplyVarScaling(absl::Span<const double> var_scaling,
                      MPModelProto* mp_model) {
   const int num_variables = mp_model->variable_size();
   for (int i = 0; i < num_variables; ++i) {
@@ -164,7 +164,7 @@ namespace {
 //
 // Precondition: var must be the only non-integer in the given constraint.
 double GetIntegralityMultiplier(const MPModelProto& mp_model,
-                                const std::vector<double>& var_scaling, int var,
+                                absl::Span<const double> var_scaling, int var,
                                 int ct_index, double tolerance) {
   DCHECK(!mp_model.variable(var).is_integer());
   const MPConstraintProto& ct = mp_model.constraint(ct_index);
@@ -856,7 +856,7 @@ ConstraintProto* ConstraintScaler::AddConstraint(
 }
 
 // TODO(user): unit test this.
-double FindFractionalScaling(const std::vector<double>& coefficients,
+double FindFractionalScaling(absl::Span<const double> coefficients,
                              double tolerance) {
   double multiplier = 1.0;
   for (const double coeff : coefficients) {
@@ -870,9 +870,9 @@ double FindFractionalScaling(const std::vector<double>& coefficients,
 }  // namespace
 
 double FindBestScalingAndComputeErrors(
-    const std::vector<double>& coefficients,
-    const std::vector<double>& lower_bounds,
-    const std::vector<double>& upper_bounds, int64_t max_absolute_activity,
+    absl::Span<const double> coefficients,
+    absl::Span<const double> lower_bounds,
+    absl::Span<const double> upper_bounds, int64_t max_absolute_activity,
     double wanted_absolute_activity_precision, double* relative_coeff_error,
     double* scaled_sum_error) {
   // Starts by computing the highest possible factor.
@@ -1352,7 +1352,7 @@ bool ConvertCpModelProtoToMPModelProto(const CpModelProto& input,
 }
 
 bool ScaleAndSetObjective(const SatParameters& params,
-                          const std::vector<std::pair<int, double>>& objective,
+                          absl::Span<const std::pair<int, double>> objective,
                           double objective_offset, bool maximize,
                           CpModelProto* cp_model, SolverLogger* logger) {
   // Make sure the objective is currently empty.
@@ -1507,8 +1507,8 @@ bool ConvertBinaryMPModelProtoToBooleanProblem(const MPModelProto& mp_model,
     // Abort if the variable is not binary.
     if (!is_binary) {
       LOG(WARNING) << "The variable #" << var_id << " with name "
-                   << mp_var.name() << " is not binary. " << "lb: " << lb
-                   << " ub: " << ub;
+                   << mp_var.name() << " is not binary. "
+                   << "lb: " << lb << " ub: " << ub;
       return false;
     }
   }

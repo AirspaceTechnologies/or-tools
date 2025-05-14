@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,6 +25,10 @@ namespace operations_research::math_opt {
 //
 // The RemoveNames() function can be used on the model to remove names if they
 // should not be exported.
+//
+// Warning: LP format does not support "range constraints" (linear constraints
+// with both upper and lower bounds). An equivalent model without range
+// constraints is exported instead.
 //
 // For more information about the different LP file formats:
 // http://lpsolve.sourceforge.net/5.5/lp-format.htm

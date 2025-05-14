@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,7 +14,6 @@
 #ifndef OR_TOOLS_SAT_PRESOLVE_UTIL_H_
 #define OR_TOOLS_SAT_PRESOLVE_UTIL_H_
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -24,12 +23,9 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/random/bit_gen_ref.h"
-#include "absl/random/random.h"
-#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/strong_vector.h"
-#include "ortools/base/types.h"
+#include "ortools/base/timer.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_utils.h"
 #include "ortools/sat/util.h"
@@ -86,7 +82,7 @@ class PresolveTimer {
 
 // If for each literal of a clause, we can infer a domain on an integer
 // variable, then we know that this variable domain is included in the union of
-// such infered domains.
+// such inferred domains.
 //
 // This allows to propagate "element" like constraints encoded as enforced
 // linear relations, and other more general reasoning.
@@ -137,7 +133,7 @@ class DomainDeductions {
   std::vector<int> tmp_num_occurrences_;
 
   SparseBitset<Index> something_changed_;
-  absl::StrongVector<Index, std::vector<int>> enforcement_to_vars_;
+  util_intops::StrongVector<Index, std::vector<int>> enforcement_to_vars_;
   absl::flat_hash_map<std::pair<Index, int>, Domain> deductions_;
 };
 
@@ -155,6 +151,63 @@ bool AddLinearConstraintMultiple(int64_t factor, const ConstraintProto& to_add,
 // or other issue with the substitution.
 bool SubstituteVariable(int var, int64_t var_coeff_in_definition,
                         const ConstraintProto& definition, ConstraintProto* ct);
+
+// Same as a vector<T> or hash_map<int, T> where the index are in [0, size),
+// but optimized for the case where only a few entries are touched before the
+// vector need to be reset to zero and used again.
+//
+// TODO(user): Maybe a SparseBitset + sparse clear is better. But this is a
+// worth alternative to test IMO.
+template <typename T>
+class VectorWithSparseUsage {
+ public:
+  // Taking a view allow to cache the never changing addresses.
+  class View {
+   public:
+    View(int* i, int* pi, T* pv)
+        : index_to_position_(i),
+          position_to_index_(pi),
+          position_to_value_(pv) {}
+
+    T& operator[](int index) {
+      const int p = index_to_position_[index];
+      if (p < size_ && index == position_to_index_[p]) {
+        // [index] was already called.
+        return position_to_value_[p];
+      }
+
+      // First call.
+      index_to_position_[index] = size_;
+      position_to_index_[size_] = index;
+      position_to_value_[size_] = 0;
+      return position_to_value_[size_++];
+    }
+
+   private:
+    int size_ = 0;
+    int* const index_to_position_;
+    int* const position_to_index_;
+    T* const position_to_value_;
+  };
+
+  // This reserve the size for using indices in [0, size).
+  View ClearedView(int size) {
+    index_to_position_.resize(size);
+    position_to_index_.resize(size);
+    position_to_value_.resize(size);
+    return View(index_to_position_.data(), position_to_index_.data(),
+                position_to_value_.data());
+  }
+
+ private:
+  // We never need to clear this. We can detect stale positions if
+  // position_to_index_[index_to_position_[index]] is inconsistent.
+  std::vector<int> index_to_position_;
+
+  // Only the beginning [0, num touched indices) is used here.
+  std::vector<int> position_to_index_;
+  std::vector<T> position_to_value_;
+};
 
 // Try to get more precise min/max activity of a linear constraints using
 // at most ones from the model. This is heuristic based but should be relatively
@@ -188,6 +241,10 @@ class ActivityBoundHelper {
   //
   // Important: We shouldn't have duplicates or a lit and NegatedRef(lit)
   // appearing both.
+  //
+  // Note: the result of this function is not exact (it uses an heuristic to
+  // detect AMOs), but it does not depend on the order of the input terms, so
+  // passing an input in non-deterministic order is fine.
   //
   // TODO(user): Indicate when the bounds are trivial (i.e. not intersection
   // with any amo) so that we don't waste more time processing the result?
@@ -261,14 +318,19 @@ class ActivityBoundHelper {
   // We use an unique index by at most one, and just stores for each literal
   // the at most one to which it belong.
   int num_at_most_ones_ = 0;
-  absl::StrongVector<Index, std::vector<int>> amo_indices_;
+  util_intops::StrongVector<Index, std::vector<int>> amo_indices_;
 
-  std::vector<std::pair<int, int64_t>> tmp_terms_;
-  std::vector<std::pair<int64_t, int>> to_sort_;
+  std::vector<std::pair<int, int64_t>> tmp_terms_for_compute_activity_;
+
+  struct TermWithIndex {
+    int64_t coeff;
+    Index index;
+    int span_index;
+  };
+  std::vector<TermWithIndex> to_sort_;
 
   // We partition the set of term into disjoint at most one.
-  absl::flat_hash_map<int, int> used_amo_to_dense_index_;
-  absl::flat_hash_map<int, int64_t> amo_sums_;
+  VectorWithSparseUsage<int64_t> amo_sums_;
   std::vector<int> partition_;
   std::vector<int64_t> max_by_partition_;
   std::vector<int64_t> second_max_by_partition_;
@@ -305,7 +367,7 @@ class ClauseWithOneMissingHasher {
   }
 
   absl::BitGenRef random_;
-  absl::StrongVector<Index, uint64_t> literal_to_hash_;
+  util_intops::StrongVector<Index, uint64_t> literal_to_hash_;
   std::vector<uint64_t> clause_to_hash_;
 };
 

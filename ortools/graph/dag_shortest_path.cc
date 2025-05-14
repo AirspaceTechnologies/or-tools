@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,7 +19,6 @@
 
 #include "absl/log/check.h"
 #include "absl/types/span.h"
-#include "ortools/graph/ebert_graph.h"
 #include "ortools/graph/graph.h"
 #include "ortools/graph/topologicalsorter.h"
 
@@ -27,9 +26,9 @@ namespace operations_research {
 
 namespace {
 
-  using GraphType = util::StaticGraph<>;
-  using NodeIndex = GraphType::NodeIndex;
-  using ArcIndex = GraphType::ArcIndex;
+using GraphType = util::StaticGraph<>;
+using NodeIndex = GraphType::NodeIndex;
+using ArcIndex = GraphType::ArcIndex;
 
 struct ShortestPathOnDagProblem {
   GraphType graph;
@@ -44,7 +43,7 @@ ShortestPathOnDagProblem ReadProblem(
   std::vector<double> arc_lengths;
   arc_lengths.reserve(arcs_with_length.size());
   for (const auto& arc : arcs_with_length) {
-    graph.AddArc(arc.tail, arc.head);
+    graph.AddArc(arc.from, arc.to);
     arc_lengths.push_back(arc.length);
   }
   std::vector<ArcIndex> permutation;
@@ -58,17 +57,18 @@ ShortestPathOnDagProblem ReadProblem(
     }
   }
 
-  const absl::StatusOr<std::vector<NodeIndex>> topological_order =
+  absl::StatusOr<std::vector<NodeIndex>> topological_order =
       util::graph::FastTopologicalSort(graph);
   CHECK_OK(topological_order) << "arcs_with_length form a cycle.";
 
-  return ShortestPathOnDagProblem{.graph = graph,
-                                  .arc_lengths = arc_lengths,
-                                  .original_arc_indices = original_arc_indices,
-                                  .topological_order = *topological_order};
+  return ShortestPathOnDagProblem{
+      .graph = std::move(graph),
+      .arc_lengths = std::move(arc_lengths),
+      .original_arc_indices = std::move(original_arc_indices),
+      .topological_order = std::move(topological_order).value()};
 }
 
-void GetOriginalArcPath(const std::vector<ArcIndex>& original_arc_indices,
+void GetOriginalArcPath(absl::Span<const ArcIndex> original_arc_indices,
                         std::vector<ArcIndex>& arc_path) {
   if (original_arc_indices.empty()) {
     return;
@@ -98,7 +98,7 @@ PathWithLength ShortestPathsOnDag(
   GetOriginalArcPath(problem.original_arc_indices, arc_path);
   return PathWithLength{
       .length = shortest_path_on_dag.LengthTo(destination),
-      .arc_path = arc_path,
+      .arc_path = std::move(arc_path),
       .node_path = shortest_path_on_dag.NodePathTo(destination)};
 }
 
@@ -108,7 +108,7 @@ std::vector<PathWithLength> KShortestPathsOnDag(
   const ShortestPathOnDagProblem problem =
       ReadProblem(num_nodes, arcs_with_length);
 
-  KShortestPathsOnDagWrapper<util::StaticGraph<>> shortest_paths_on_dag(
+  KShortestPathsOnDagWrapper<GraphType> shortest_paths_on_dag(
       &problem.graph, &problem.arc_lengths, problem.topological_order,
       path_count);
   shortest_paths_on_dag.RunKShortestPathOnDag({source});
@@ -118,9 +118,9 @@ std::vector<PathWithLength> KShortestPathsOnDag(
   }
 
   std::vector<double> lengths = shortest_paths_on_dag.LengthsTo(destination);
-  std::vector<std::vector<ArcIndex>> arc_paths =
+  std::vector<std::vector<GraphType::ArcIndex>> arc_paths =
       shortest_paths_on_dag.ArcPathsTo(destination);
-  std::vector<std::vector<NodeIndex>> node_paths =
+  std::vector<std::vector<GraphType::NodeIndex>> node_paths =
       shortest_paths_on_dag.NodePathsTo(destination);
   std::vector<PathWithLength> paths;
   paths.reserve(lengths.size());

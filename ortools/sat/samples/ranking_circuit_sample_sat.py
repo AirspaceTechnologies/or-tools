@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -26,7 +26,7 @@ def rank_tasks_with_circuit(
     durations: Sequence[int],
     presences: Sequence[cp_model.IntVar],
     ranks: Sequence[cp_model.IntVar],
-):
+) -> None:
     """This method uses a circuit constraint to rank tasks.
 
     This method assumes that all starts are disjoint, meaning that all tasks have
@@ -36,7 +36,7 @@ def rank_tasks_with_circuit(
     To implement this ranking, we will create a dense graph with num_tasks + 1
     nodes.
     The extra node (with id 0) will be used to decide which task is first with
-    its only outgoing arc, and whhich task is last with its only incoming arc.
+    its only outgoing arc, and which task is last with its only incoming arc.
     Each task i will be associated with id i + 1, and an arc between i + 1 and j +
     1 indicates that j is the immediate successor of i.
 
@@ -102,7 +102,7 @@ def rank_tasks_with_circuit(
     model.add_circuit(arcs)
 
 
-def ranking_sample_sat():
+def ranking_sample_sat() -> None:
     """Ranks tasks in a NoOverlap constraint."""
 
     model = cp_model.CpModel()

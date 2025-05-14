@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -55,10 +55,12 @@
 #include <string>
 #include <utility>
 
+#include "absl/flags/declare.h"
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/time.h"
 #include "ortools/base/file.h"
@@ -68,6 +70,7 @@
 #include "ortools/base/options.h"
 #include "ortools/linear_solver/linear_solver.h"
 #include "ortools/linear_solver/linear_solver.pb.h"
+#include "ortools/linear_solver/model_exporter.h"
 #include "ortools/lp_data/lp_parser.h"
 #include "ortools/lp_data/mps_reader.h"
 #include "ortools/lp_data/sol_reader.h"
@@ -114,13 +117,8 @@ ABSL_FLAG(std::string, dump_response, "",
           "If non-empty, dumps MPSolutionResponse there.");
 ABSL_FLAG(std::string, sol_file, "",
           "If non-empty, output the best solution in Miplib .sol format.");
-
-ABSL_DECLARE_FLAG(bool, verify_solution);  // Defined in ./linear_solver.cc
-ABSL_DECLARE_FLAG(bool,
-                  log_verification_errors);  // Defined in ./linear_solver.cc
-ABSL_DECLARE_FLAG(
-    bool,
-    linear_solver_enable_verbose_output);  // Defined in ./linear_solver.cc
+ABSL_FLAG(std::string, dump_mps, "",
+          "If non-empty, dumps the model in mps format there.");
 
 static const char kUsageStr[] =
     "Run MPSolver on the given input file. Many formats are supported: \n"
@@ -308,6 +306,11 @@ void Run() {
   } else {
     LOG(FATAL) << "Unsupported --dump_format: "
                << absl::GetFlag(FLAGS_dump_format);
+  }
+
+  if (!absl::GetFlag(FLAGS_dump_mps).empty()) {
+    CHECK_OK(WriteModelToMpsFile(absl::GetFlag(FLAGS_dump_mps),
+                                 request_proto.model()));
   }
 
   // Set or override request proto options from the command line flags.

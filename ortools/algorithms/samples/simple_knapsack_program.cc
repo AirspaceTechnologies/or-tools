@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,12 +15,14 @@
 // [START import]
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <iterator>
 #include <numeric>
 #include <sstream>
 #include <vector>
 
 #include "ortools/algorithms/knapsack_solver.h"
+#include "ortools/base/logging.h"
 // [END import]
 
 namespace operations_research {
@@ -37,7 +39,7 @@ void SimpleKnapsackProgram() {
                                                 230, 315, 393, 125, 670, 892,
                                                 600, 293, 712, 147, 421, 255}};
   std::vector<int64_t> capacities = {850};
-  std::vector<int64_t> values = weights[0];
+  const std::vector<int64_t>& values = weights[0];
   // [END data]
 
   // [START solve]

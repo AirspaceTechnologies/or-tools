@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -29,6 +29,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "ortools/base/accurate_sum.h"
 #include "ortools/base/commandlineflags.h"
@@ -447,7 +448,7 @@ class LazyMPModelNameToIndexMaps {
 
   absl::StatusOr<int> LookupName(
       MPModelProto::Annotation::TargetType target_type,
-      const std::string& name) {
+      absl::string_view name) {
     const absl::flat_hash_map<std::string, int>* map = nullptr;
     switch (target_type) {
       case MPModelProto::Annotation::VARIABLE_DEFAULT:

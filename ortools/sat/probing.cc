@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -31,6 +31,7 @@
 #include "ortools/sat/clause.h"
 #include "ortools/sat/implied_bounds.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_parameters.pb.h"
@@ -149,7 +150,8 @@ bool Prober::ProbeOneVariableInternal(BooleanVariable b) {
   IntegerValue ub_min = kMaxIntegerValue;
   new_integer_bounds_.push_back(IntegerLiteral());  // Sentinel.
 
-  for (int i = 0; i < new_integer_bounds_.size(); ++i) {
+  const int limit = new_integer_bounds_.size();
+  for (int i = 0; i < limit; ++i) {
     const IntegerVariable var = new_integer_bounds_[i].var;
 
     // Hole detection.
@@ -406,7 +408,7 @@ bool Prober::ProbeDnf(absl::string_view name,
       num_new_literals_fixed_ > previous_num_literals_fixed) {
     VLOG(1) << "ProbeDnf(" << name << ", num_fixed_literals="
             << num_new_literals_fixed_ - previous_num_literals_fixed
-            << ", num_fixed_integer_bounds="
+            << ", num_pushed_integer_bounds="
             << num_new_integer_bounds_ - previous_num_integer_bounds
             << ", num_valid_conjunctions=" << num_valid_conjunctions << "/"
             << dnf.size() << ")";
@@ -540,10 +542,10 @@ bool FailedLiteralProbingRound(ProbingOptions options, Model* model) {
     bool operator<(const SavedNextLiteral& o) const { return rank < o.rank; }
   };
   std::vector<SavedNextLiteral> queue;
-  absl::StrongVector<LiteralIndex, int> position_in_order;
+  util_intops::StrongVector<LiteralIndex, int> position_in_order;
 
   // This is only needed when options use_queue is false;
-  absl::StrongVector<LiteralIndex, int> starts;
+  util_intops::StrongVector<LiteralIndex, int> starts;
   if (!options.use_queue) starts.resize(2 * num_variables, 0);
 
   // We delay fixing of already assigned literal once we go back to level
@@ -889,8 +891,9 @@ bool FailedLiteralProbingRound(ProbingOptions options, Model* model) {
   const bool limit_reached = time_limit->LimitReached() ||
                              time_limit->GetElapsedDeterministicTime() > limit;
   LOG_IF(INFO, options.log_info)
-      << "Probing. " << " num_probed: " << num_probed << " num_fixed: +"
-      << num_newly_fixed << " (" << num_fixed << "/" << num_variables << ")"
+      << "Probing. "
+      << " num_probed: " << num_probed << " num_fixed: +" << num_newly_fixed
+      << " (" << num_fixed << "/" << num_variables << ")"
       << " explicit_fix:" << num_explicit_fix
       << " num_conflicts:" << num_conflicts
       << " new_binary_clauses: " << num_new_binary

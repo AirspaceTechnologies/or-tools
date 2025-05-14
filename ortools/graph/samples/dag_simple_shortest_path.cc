@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,11 +23,11 @@ int main(int argc, char** argv) {
 
   // The input graph, encoded as a list of arcs with distances.
   std::vector<operations_research::ArcWithLength> arcs = {
-      {.tail = 0, .head = 2, .length = 5},
-      {.tail = 0, .head = 3, .length = 4},
-      {.tail = 1, .head = 3, .length = 1},
-      {.tail = 2, .head = 4, .length = -3},
-      {.tail = 3, .head = 4, .length = 0}};
+      {.from = 0, .to = 2, .length = 5},
+      {.from = 0, .to = 3, .length = 4},
+      {.from = 1, .to = 3, .length = 1},
+      {.from = 2, .to = 4, .length = -3},
+      {.from = 3, .to = 4, .length = 0}};
   const int num_nodes = 5;
 
   const int source = 0;

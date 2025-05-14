@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -27,6 +27,9 @@ namespace operations_research::math_opt {
 // The RemoveNames() function can be used on the model to remove names if they
 // should not be exported.
 absl::StatusOr<std::string> ModelProtoToMps(const ModelProto& model);
+
+// Converts a string with the contents of an MPS file into a ModelProto.
+absl::StatusOr<ModelProto> MpsToModelProto(absl::string_view mps_data);
 
 // Reads an MPS file and converts it to a ModelProto (like MpsToModelProto
 // above, but takes a file name instead of the file contents and reads the file.

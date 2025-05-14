@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,12 +18,12 @@
 #include <utility>
 #include <vector>
 
+#include "absl/types/span.h"
 #include "ortools/base/strong_vector.h"
-#include "ortools/base/types.h"
 #include "ortools/sat/model.h"
-#include "ortools/sat/pb_constraint.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_parameters.pb.h"
+#include "ortools/sat/synchronization.h"
 #include "ortools/sat/util.h"
 #include "ortools/util/bitset.h"
 #include "ortools/util/integer_pq.h"
@@ -106,6 +106,15 @@ class SatDecisionPolicy {
     return 0.0;
   }
 
+  // Like SetAssignmentPreference() but it can be overridden by phase-saving.
+  void SetTargetPolarity(Literal l) {
+    var_polarity_[l.Variable()] = l.IsPositive();
+  }
+  absl::Span<const Literal> GetBestPartialAssignment() const {
+    return best_partial_assignment_;
+  }
+  void ClearBestPartialAssignment() { best_partial_assignment_.clear(); }
+
  private:
   // Computes an initial variable ordering.
   void InitializeVariableOrdering();
@@ -124,6 +133,9 @@ class SatDecisionPolicy {
   void FlipCurrentPolarity();
   void RandomizeCurrentPolarity();
 
+  // This one returns false if there is no such solution to use.
+  bool UseLsSolutionAsInitialPolarity();
+
   // Adds the given variable to var_ordering_ or updates its priority if it is
   // already present.
   void PqInsertOrUpdate(BooleanVariable var);
@@ -132,6 +144,12 @@ class SatDecisionPolicy {
   const SatParameters& parameters_;
   const Trail& trail_;
   ModelRandomGenerator* random_;
+
+  // TODO(user): This is in term of proto indices. Ideally we would need
+  // CpModelMapping to map that to Booleans but this currently lead to cyclic
+  // dependencies. For now we just assume one to one correspondence for the
+  // first entries. This will only work on pure Boolean problems.
+  SharedLsSolutionRepository* ls_hints_;
 
   // Variable ordering (priority will be adjusted dynamically). queue_elements_
   // holds the elements used by var_ordering_ (it uses pointers).
@@ -204,24 +222,24 @@ class SatDecisionPolicy {
 
   // Stores variable activity and the number of time each variable was "bumped".
   // The later is only used with the ERWA heuristic.
-  absl::StrongVector<BooleanVariable, double> activities_;
-  absl::StrongVector<BooleanVariable, float> tie_breakers_;
-  absl::StrongVector<BooleanVariable, int64_t> num_bumps_;
+  util_intops::StrongVector<BooleanVariable, double> activities_;
+  util_intops::StrongVector<BooleanVariable, float> tie_breakers_;
+  util_intops::StrongVector<BooleanVariable, int64_t> num_bumps_;
 
   // If the polarity if forced (externally) we always use this first.
-  absl::StrongVector<BooleanVariable, bool> has_forced_polarity_;
-  absl::StrongVector<BooleanVariable, bool> forced_polarity_;
+  util_intops::StrongVector<BooleanVariable, bool> has_forced_polarity_;
+  util_intops::StrongVector<BooleanVariable, bool> forced_polarity_;
 
   // If we are in a stable phase, we follow the current target.
   bool in_stable_phase_ = false;
   int target_length_ = 0;
-  absl::StrongVector<BooleanVariable, bool> has_target_polarity_;
-  absl::StrongVector<BooleanVariable, bool> target_polarity_;
+  util_intops::StrongVector<BooleanVariable, bool> has_target_polarity_;
+  util_intops::StrongVector<BooleanVariable, bool> target_polarity_;
 
   // Otherwise we follow var_polarity_ which is reset at the beginning of
   // each new polarity phase. This is also overwritten by phase saving.
   // Each phase last for an arithmetically increasing number of conflicts.
-  absl::StrongVector<BooleanVariable, bool> var_polarity_;
+  util_intops::StrongVector<BooleanVariable, bool> var_polarity_;
   bool maybe_enable_phase_saving_ = true;
   int64_t polarity_phase_ = 0;
   int64_t num_conflicts_until_rephase_ = 1000;

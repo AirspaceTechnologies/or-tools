@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -57,6 +57,27 @@ absl::StatusOr<MapFilter<LinearConstraint>> LinearConstraintFilterFromProto(
                << id << " not in model";
       }
       filtered.insert(model.linear_constraint(id));
+    }
+    result.filtered_keys = std::move(filtered);
+  }
+  return result;
+}
+
+absl::StatusOr<MapFilter<QuadraticConstraint>>
+QuadraticConstraintFilterFromProto(const Model& model,
+                                   const SparseVectorFilterProto& proto) {
+  MapFilter<QuadraticConstraint> result = {.skip_zero_values =
+                                               proto.skip_zero_values()};
+  if (proto.filter_by_ids()) {
+    absl::flat_hash_set<QuadraticConstraint> filtered;
+    for (const int64_t id : proto.filtered_ids()) {
+      if (!model.has_quadratic_constraint(id)) {
+        return util::InvalidArgumentErrorBuilder()
+               << "cannot create MapFilter<QuadraticConstraint> from proto, "
+                  "quadratic constraint id: "
+               << id << " not in model";
+      }
+      filtered.insert(model.quadratic_constraint(id));
     }
     result.filtered_keys = std::move(filtered);
   }

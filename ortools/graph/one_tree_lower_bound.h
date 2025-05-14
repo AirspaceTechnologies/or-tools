@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -121,8 +121,6 @@
 #ifndef OR_TOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
 #define OR_TOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
 
-#include <math.h>
-
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -131,8 +129,9 @@
 #include <vector>
 
 #include "absl/types/span.h"
-#include "ortools/base/types.h"
+#include "ortools/base/logging.h"
 #include "ortools/graph/christofides.h"
+#include "ortools/graph/graph.h"
 #include "ortools/graph/minimum_spanning_tree.h"
 
 namespace operations_research {

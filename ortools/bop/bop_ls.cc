@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -571,7 +571,7 @@ ConstraintIndex OneFlipConstraintRepairer::ConstraintToRepair() const {
 TermIndex OneFlipConstraintRepairer::NextRepairingTerm(
     ConstraintIndex ct_index, TermIndex init_term_index,
     TermIndex start_term_index) const {
-  const absl::StrongVector<TermIndex, ConstraintTerm>& terms =
+  const util_intops::StrongVector<TermIndex, ConstraintTerm>& terms =
       by_constraint_matrix_[ct_index];
   const int64_t constraint_value = maintainer_.ConstraintValue(ct_index);
   const int64_t lb = maintainer_.ConstraintLowerBound(ct_index);
@@ -623,13 +623,13 @@ sat::Literal OneFlipConstraintRepairer::GetFlip(ConstraintIndex ct_index,
 }
 
 void OneFlipConstraintRepairer::SortTermsOfEachConstraints(int num_variables) {
-  absl::StrongVector<VariableIndex, int64_t> objective(num_variables, 0);
+  util_intops::StrongVector<VariableIndex, int64_t> objective(num_variables, 0);
   for (const ConstraintTerm& term :
        by_constraint_matrix_[AssignmentAndConstraintFeasibilityMaintainer::
                                  kObjectiveConstraint]) {
     objective[term.var] = std::abs(term.weight);
   }
-  for (absl::StrongVector<TermIndex, ConstraintTerm>& terms :
+  for (util_intops::StrongVector<TermIndex, ConstraintTerm>& terms :
        by_constraint_matrix_) {
     std::sort(terms.begin(), terms.end(),
               [&objective](const ConstraintTerm& a, const ConstraintTerm& b) {
@@ -829,7 +829,8 @@ bool LocalSearchAssignmentIterator::NextAssignment() {
   // All nodes have been explored.
   if (search_nodes_.empty()) {
     VLOG(1) << std::string(27, ' ') + "LS " << max_num_decisions_
-            << " finished." << " #explored:" << num_nodes_
+            << " finished."
+            << " #explored:" << num_nodes_
             << " #stored:" << transposition_table_.size()
             << " #skipped:" << num_skipped_nodes_;
     return false;

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,7 +17,7 @@
 #include <cstdint>
 
 #include "absl/log/check.h"
-#include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 
 namespace operations_research {
 namespace sat {
@@ -27,7 +27,8 @@ ThetaLambdaTree<IntegerType>::ThetaLambdaTree() = default;
 
 template <typename IntegerType>
 typename ThetaLambdaTree<IntegerType>::TreeNode
-ThetaLambdaTree<IntegerType>::ComposeTreeNodes(TreeNode left, TreeNode right) {
+ThetaLambdaTree<IntegerType>::ComposeTreeNodes(const TreeNode& left,
+                                               const TreeNode& right) {
   return {std::max(right.envelope, left.envelope + right.sum_of_energy_min),
           std::max(right.envelope_opt,
                    right.sum_of_energy_min +
@@ -213,11 +214,12 @@ IntegerType ThetaLambdaTree<IntegerType>::GetEnvelopeOf(int event) const {
 
 template <typename IntegerType>
 void ThetaLambdaTree<IntegerType>::RefreshNode(int node) {
+  TreeNode* tree = tree_.data();
   do {
     const int right = node | 1;
     const int left = right ^ 1;
     node >>= 1;
-    tree_[node] = ComposeTreeNodes(tree_[left], tree_[right]);
+    tree[node] = ComposeTreeNodes(tree[left], tree[right]);
   } while (node > 1);
 }
 

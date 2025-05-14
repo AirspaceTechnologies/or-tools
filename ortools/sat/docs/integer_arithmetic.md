@@ -275,9 +275,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	cmpb "ortools/sat/cp_model_go_proto"
-	"ortools/sat/go/cpmodel"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	cmpb "github.com/google/or-tools/ortools/sat/proto/cpmodel"
 )
 
 const numAnimals = 20
@@ -315,7 +315,7 @@ func rabbitsAndPheasants() error {
 
 func main() {
 	if err := rabbitsAndPheasants(); err != nil {
-		glog.Exitf("rabbitsAndPheasants returned with error: %v", err)
+		log.Exitf("rabbitsAndPheasants returned with error: %v", err)
 	}
 }
 ```
@@ -512,6 +512,7 @@ import com.google.ortools.Loader;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.DecisionStrategyProto;
 import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.LinearExpr;
@@ -570,7 +571,7 @@ public class EarlinessTardinessCostSampleSat {
     solver.getParameters().setEnumerateAllSolutions(true);
 
     // Solve the problem with the printer callback.
-    solver.solve(model, new CpSolverSolutionCallback() {
+    CpSolverStatus unusedStatus = solver.solve(model, new CpSolverSolutionCallback() {
       public CpSolverSolutionCallback init(IntVar[] variables) {
         variableArray = variables;
         return this;
@@ -674,11 +675,11 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	"golang/protobuf/v2/proto/proto"
-	cmpb "ortools/sat/cp_model_go_proto"
-	"ortools/sat/go/cpmodel"
-	sppb "ortools/sat/sat_parameters_go_proto"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	cmpb "github.com/google/or-tools/ortools/sat/proto/cpmodel"
+	sppb "github.com/google/or-tools/ortools/sat/proto/satparameters"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -718,12 +719,12 @@ func earlinessTardinessCostSampleSat() error {
 	if err != nil {
 		return fmt.Errorf("failed to instantiate the CP model: %w", err)
 	}
-	params := sppb.SatParameters_builder{
+	params := &sppb.SatParameters{
 		FillAdditionalSolutionsInResponse: proto.Bool(true),
 		EnumerateAllSolutions:             proto.Bool(true),
 		SolutionPoolSize:                  proto.Int32(21),
 		SearchBranching:                   sppb.SatParameters_FIXED_SEARCH.Enum(),
-	}.Build()
+	}
 	response, err := cpmodel.SolveCpModelWithParameters(m, params)
 	if err != nil {
 		return fmt.Errorf("failed to solve the model: %w", err)
@@ -741,7 +742,7 @@ func earlinessTardinessCostSampleSat() error {
 
 func main() {
 	if err := earlinessTardinessCostSampleSat(); err != nil {
-		glog.Exitf("earlinessTardinessCostSampleSat returned with error: %v", err)
+		log.Exitf("earlinessTardinessCostSampleSat returned with error: %v", err)
 	}
 }
 ```
@@ -949,6 +950,7 @@ import com.google.ortools.Loader;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.DecisionStrategyProto;
 import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.Literal;
@@ -1012,7 +1014,7 @@ public class StepFunctionSampleSat {
     solver.getParameters().setEnumerateAllSolutions(true);
 
     // Solve the problem with the printer callback.
-    solver.solve(model, new CpSolverSolutionCallback() {
+    CpSolverStatus unusedStatus = solver.solve(model, new CpSolverSolutionCallback() {
       public CpSolverSolutionCallback init(IntVar[] variables) {
         variableArray = variables;
         return this;
@@ -1129,11 +1131,11 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	"golang/protobuf/v2/proto/proto"
-	cmpb "ortools/sat/cp_model_go_proto"
-	"ortools/sat/go/cpmodel"
-	sppb "ortools/sat/sat_parameters_go_proto"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	cmpb "github.com/google/or-tools/ortools/sat/proto/cpmodel"
+	sppb "github.com/google/or-tools/ortools/sat/proto/satparameters"
+	"google.golang.org/protobuf/proto"
 )
 
 func stepFunctionSampleSat() error {
@@ -1183,12 +1185,12 @@ func stepFunctionSampleSat() error {
 	if err != nil {
 		return fmt.Errorf("failed to instantiate the CP model: %w", err)
 	}
-	params := sppb.SatParameters_builder{
+	params := &sppb.SatParameters{
 		FillAdditionalSolutionsInResponse: proto.Bool(true),
 		EnumerateAllSolutions:             proto.Bool(true),
 		SolutionPoolSize:                  proto.Int32(21),
 		SearchBranching:                   sppb.SatParameters_FIXED_SEARCH.Enum(),
-	}.Build()
+	}
 	response, err := cpmodel.SolveCpModelWithParameters(m, params)
 	if err != nil {
 		return fmt.Errorf("failed to solve the model: %w", err)
@@ -1206,7 +1208,7 @@ func stepFunctionSampleSat() error {
 
 func main() {
 	if err := stepFunctionSampleSat(); err != nil {
-		glog.Exitf("stepFunctionSampleSat returned with error: %v", err)
+		log.Exitf("stepFunctionSampleSat returned with error: %v", err)
 	}
 }
 ```
@@ -1301,4 +1303,91 @@ def bool_and_int_var_product_sample_sat():
 
 
 bool_and_int_var_product_sample_sat()
+```
+
+## Scanning the domain of variables.
+
+In this example, we will implement the all_different_except_0 constraint. This
+constraint is useful as it expresses that 2 active assignment should be
+different, but we do not care when they are inactive (represented by being
+assigned a zero value).
+
+To implement this constraint, we will collect all values in the initial domain
+of all variables and attach Boolean variables for each of them. This requires
+reading back the values from the model.
+
+### Python code
+
+```python
+#!/usr/bin/env python3
+"""Implements AllDifferentExcept0 using atomic constraints."""
+
+import collections
+
+from ortools.sat.python import cp_model
+
+
+def all_different_except_0():
+    """Encode the AllDifferentExcept0 constraint."""
+
+    # Model.
+    model = cp_model.CpModel()
+
+    # Declare our primary variable.
+    x = [model.new_int_var(0, 10, f"x{i}") for i in range(5)]
+
+    # Expand the AllDifferentExcept0 constraint.
+    variables_per_value = collections.defaultdict(list)
+    all_values = set()
+
+    for var in x:
+        all_encoding_literals = []
+        # Domains of variables are represented by flat intervals.
+        for i in range(0, len(var.proto.domain), 2):
+            start = var.proto.domain[i]
+            end = var.proto.domain[i + 1]
+            for value in range(start, end + 1):  # Intervals are inclusive.
+                # Create the literal attached to var == value.
+                bool_var = model.new_bool_var(f"{var} == {value}")
+                model.add(var == value).only_enforce_if(bool_var)
+
+                # Collect all encoding literals for a given variable.
+                all_encoding_literals.append(bool_var)
+
+                # Collect all encoding literals for a given value.
+                variables_per_value[value].append(bool_var)
+
+                # Collect all different values.
+                all_values.add(value)
+
+        # One variable must have exactly one value.
+        model.add_exactly_one(all_encoding_literals)
+
+    # Add the all_different constraints.
+    for value, literals in variables_per_value.items():
+        if value == 0:
+            continue
+        model.add_at_most_one(literals)
+
+    model.add(x[0] == 0)
+    model.add(x[1] == 0)
+
+    model.maximize(sum(x))
+
+    # Create a solver and solve.
+    solver = cp_model.CpSolver()
+    status = solver.solve(model)
+
+    # Checks and prints the output.
+    if status == cp_model.OPTIMAL:
+        print(f"Optimal solution: {solver.objective_value}, expected: 27.0")
+    elif status == cp_model.FEASIBLE:
+        print(f"Feasible solution: {solver.objective_value}, optimal 27.0")
+    elif status == cp_model.INFEASIBLE:
+        print("The model is infeasible")
+    else:
+        print("Something went wrong. Please check the status and the log")
+
+
+all_different_except_0()
 ```

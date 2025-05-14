@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,22 +18,25 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
-#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "ortools/base/strong_vector.h"
-#include "ortools/base/types.h"
 #include "ortools/graph/graph.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_solver.h"
 #include "ortools/sat/synchronization.h"
+#include "ortools/sat/util.h"
 #include "ortools/util/bitset.h"
+#include "ortools/util/rev.h"
 #include "ortools/util/strong_integers.h"
 
 namespace operations_research {
@@ -98,7 +101,7 @@ class PrecedenceRelations : public ReversibleInterface {
   // support the general non-DAG cases.
   //
   // TODO(user): Many relations can be redundant. Filter them.
-  void ComputeFullPrecedences(const std::vector<IntegerVariable>& vars,
+  void ComputeFullPrecedences(absl::Span<const IntegerVariable> vars,
                               std::vector<FullIntegerPrecedence>* output);
 
   // Returns a set of precedences (var, index) such that var is after
@@ -109,7 +112,7 @@ class PrecedenceRelations : public ReversibleInterface {
     IntegerVariable var;
     int index;
   };
-  void CollectPrecedences(const std::vector<IntegerVariable>& vars,
+  void CollectPrecedences(absl::Span<const IntegerVariable> vars,
                           std::vector<PrecedenceData>* output);
 
   // If we don't have too many variable, we compute the full transitive closure
@@ -233,14 +236,15 @@ class PrecedenceRelations : public ReversibleInterface {
   // Store for each variable x, the variables y that appears in GetOffset(x, y)
   // or GetConditionalOffset(x, y). That is the variable that are after x with
   // an offset. Note that conditional_after_ is updated on dive/backtrack.
-  absl::StrongVector<IntegerVariable, std::vector<IntegerVariable>> after_;
-  absl::StrongVector<IntegerVariable, std::vector<IntegerVariable>>
+  util_intops::StrongVector<IntegerVariable, std::vector<IntegerVariable>>
+      after_;
+  util_intops::StrongVector<IntegerVariable, std::vector<IntegerVariable>>
       conditional_after_;
 
   // Temp data for CollectPrecedences.
   std::vector<IntegerVariable> var_with_positive_degree_;
-  absl::StrongVector<IntegerVariable, int> var_to_degree_;
-  absl::StrongVector<IntegerVariable, int> var_to_last_index_;
+  util_intops::StrongVector<IntegerVariable, int> var_to_degree_;
+  util_intops::StrongVector<IntegerVariable, int> var_to_last_index_;
   std::vector<PrecedenceData> tmp_precedences_;
 };
 
@@ -413,17 +417,18 @@ class PrecedencesPropagator : public SatPropagator, PropagatorInterface {
   // consecutive like in StaticGraph should have a big performance impact.
   //
   // TODO(user): We do not need to store ArcInfo.tail_var here.
-  absl::StrongVector<IntegerVariable, absl::InlinedVector<ArcIndex, 6>>
+  util_intops::StrongVector<IntegerVariable, absl::InlinedVector<ArcIndex, 6>>
       impacted_arcs_;
-  absl::StrongVector<ArcIndex, ArcInfo> arcs_;
+  util_intops::StrongVector<ArcIndex, ArcInfo> arcs_;
 
   // This is similar to impacted_arcs_/arcs_ but it is only used to propagate
   // one of the presence literals when the arc cannot be present. An arc needs
   // to appear only once in potential_arcs_, but it will be referenced by
   // all its variable in impacted_potential_arcs_.
-  absl::StrongVector<IntegerVariable, absl::InlinedVector<OptionalArcIndex, 6>>
+  util_intops::StrongVector<IntegerVariable,
+                            absl::InlinedVector<OptionalArcIndex, 6>>
       impacted_potential_arcs_;
-  absl::StrongVector<OptionalArcIndex, ArcInfo> potential_arcs_;
+  util_intops::StrongVector<OptionalArcIndex, ArcInfo> potential_arcs_;
 
   // Each time a literal becomes true, this list the set of arcs for which we
   // need to decrement their count. When an arc count reach zero, it must be
@@ -432,9 +437,9 @@ class PrecedencesPropagator : public SatPropagator, PropagatorInterface {
   //
   // TODO(user): Try a one-watcher approach instead. Note that in most cases
   // arc should be controlled by 1 or 2 literals, so not sure it is worth it.
-  absl::StrongVector<LiteralIndex, absl::InlinedVector<ArcIndex, 6>>
+  util_intops::StrongVector<LiteralIndex, absl::InlinedVector<ArcIndex, 6>>
       literal_to_new_impacted_arcs_;
-  absl::StrongVector<ArcIndex, int> arc_counts_;
+  util_intops::StrongVector<ArcIndex, int> arc_counts_;
 
   // Temp vectors to hold the reason of an assignment.
   std::vector<Literal> literal_reason_;
@@ -462,19 +467,75 @@ class PrecedencesPropagator : public SatPropagator, PropagatorInterface {
 struct LinearTerm {
   IntegerVariable var = kNoIntegerVariable;
   IntegerValue coeff = IntegerValue(0);
+
+  void MakeCoeffPositive() {
+    if (coeff < 0) {
+      coeff = -coeff;
+      var = NegationOf(var);
+    }
+  }
 };
 
-// This collect all enforced linear of size 2 or 1 and detect if at least one of
-// a subset touching the same variable must be true. When this is the case
-// we add a new propagator to propagate that fact.
+// A relation of the form enforcement => a + b \in [lhs, rhs].
+// Note that the [lhs, rhs] interval should always be within [min_activity,
+// max_activity] where the activity is the value of a + b.
+struct Relation {
+  Literal enforcement;
+  LinearTerm a;
+  LinearTerm b;
+  IntegerValue lhs;
+  IntegerValue rhs;
+};
+
+// A repository of all the enforced linear constraints of size 1 or 2.
+//
+// TODO(user): This is not always needed, find a way to clean this once we
+// don't need it.
+class BinaryRelationRepository {
+ public:
+  int size() const { return relations_.size(); }
+  const Relation& relation(int index) const { return relations_[index]; }
+
+  absl::Span<const int> relation_indices(LiteralIndex lit) const {
+    if (lit >= lit_to_relations_.size()) return {};
+    return lit_to_relations_[lit];
+  }
+
+  // Adds a relation lit => a + b \in [lhs, rhs].
+  void Add(Literal lit, LinearTerm a, LinearTerm b, IntegerValue lhs,
+           IntegerValue rhs);
+
+  // Builds the literal to relations mapping. This should be called once all the
+  // relations have been added.
+  void Build();
+
+  // Assuming level-zero bounds + any (var >= value) in the input map,
+  // fills "output" with a "propagated" set of bounds assuming lit is true (by
+  // using the relations enforced by lit). Note that we will only fill bounds >
+  // level-zero ones in output.
+  //
+  // Returns false if the new bounds are infeasible at level zero.
+  bool PropagateLocalBounds(
+      const IntegerTrail& integer_trail, Literal lit,
+      const absl::flat_hash_map<IntegerVariable, IntegerValue>& input,
+      absl::flat_hash_map<IntegerVariable, IntegerValue>* output) const;
+
+ private:
+  bool is_built_ = false;
+  std::vector<Relation> relations_;
+  CompactVectorVector<LiteralIndex, int> lit_to_relations_;
+};
+
+// Detects if at least one of a subset of linear of size 2 or 1, touching the
+// same variable, must be true. When this is the case we add a new propagator to
+// propagate that fact.
 //
 // TODO(user): Shall we do that on the main thread before the workers are
 // spawned? note that the probing version need the model to be loaded though.
 class GreaterThanAtLeastOneOfDetector {
  public:
-  // Adds a relation lit => a + b \in [lhs, rhs].
-  void Add(Literal lit, LinearTerm a, LinearTerm b, IntegerValue lhs,
-           IntegerValue rhs);
+  explicit GreaterThanAtLeastOneOfDetector(Model* model)
+      : repository_(*model->GetOrCreate<BinaryRelationRepository>()) {}
 
   // Advanced usage. To be called once all the constraints have been added to
   // the model. This will detect GreaterThanAtLeastOneOfConstraint().
@@ -505,16 +566,7 @@ class GreaterThanAtLeastOneOfDetector {
                               absl::Span<const Literal> clause,
                               absl::Span<const int> indices, Model* model);
 
-  struct Relation {
-    Literal enforcement;
-    LinearTerm a;
-    LinearTerm b;
-    IntegerValue lhs;
-    IntegerValue rhs;
-  };
-
-  std::vector<Relation> relations_;
-  absl::StrongVector<LiteralIndex, std::vector<int>> lit_to_relations_;
+  BinaryRelationRepository& repository_;
 };
 
 // =============================================================================

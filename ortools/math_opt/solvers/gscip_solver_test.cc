@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -74,7 +74,8 @@ MultiObjectiveTestParameters GetGscipMultiObjectiveTestParameters() {
       /*solver_type=*/SolverType::kGscip, /*parameters=*/SolveParameters(),
       /*supports_auxiliary_objectives=*/false,
       /*supports_incremental_objective_add_and_delete=*/false,
-      /*supports_incremental_objective_modification=*/false);
+      /*supports_incremental_objective_modification=*/false,
+      /*supports_integer_variables=*/true);
 }
 
 INSTANTIATE_TEST_SUITE_P(GscipSimpleMultiObjectiveTest,
@@ -119,6 +120,7 @@ INSTANTIATE_TEST_SUITE_P(GscipSimpleQcTest, SimpleQcTest,
                          ValuesIn(GetGscipQcTestParameters()));
 INSTANTIATE_TEST_SUITE_P(GscipIncrementalQcTest, IncrementalQcTest,
                          ValuesIn(GetGscipQcTestParameters()));
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(QcDualsTest);
 
 SecondOrderConeTestParameters GetGscipSecondOrderConeTestParameters() {
   return SecondOrderConeTestParameters(
@@ -343,7 +345,7 @@ TEST(GScipSolverTest, UpdatingLowerBoundNotAllowedOnBinaryVariables) {
   Model model;
   const Variable x = model.AddBinaryVariable("x");
   ASSERT_OK_AND_ASSIGN(auto solver,
-                       IncrementalSolver::New(&model, SolverType::kGscip, {}));
+                       NewIncrementalSolver(&model, SolverType::kGscip, {}));
 
   model.set_lower_bound(x, -1.0);
   EXPECT_THAT(solver->Update(), IsOkAndHolds(Not(DidUpdate())));
@@ -353,7 +355,7 @@ TEST(GScipSolverTest, UpdatingUpperBoundNotAllowedOnBinaryVariables) {
   Model model;
   const Variable x = model.AddBinaryVariable("x");
   ASSERT_OK_AND_ASSIGN(auto solver,
-                       IncrementalSolver::New(&model, SolverType::kGscip, {}));
+                       NewIncrementalSolver(&model, SolverType::kGscip, {}));
 
   model.set_upper_bound(x, 2.0);
   EXPECT_THAT(solver->Update(), IsOkAndHolds(Not(DidUpdate())));
@@ -364,7 +366,7 @@ TEST(GScipSolverTest, UpdatingLowerBoundNotAllowedOnImplicitBinaryVariables) {
   // This will be silently converted to a binary variable in SCIP.
   const Variable y = model.AddIntegerVariable(0.0, 1.0, "y");
   ASSERT_OK_AND_ASSIGN(auto solver,
-                       IncrementalSolver::New(&model, SolverType::kGscip, {}));
+                       NewIncrementalSolver(&model, SolverType::kGscip, {}));
 
   model.set_lower_bound(y, -1.0);
   EXPECT_THAT(solver->Update(), IsOkAndHolds(Not(DidUpdate())));
@@ -375,7 +377,7 @@ TEST(GScipSolverTest, UpdatingUpperBoundNotAllowedOnImplicitBinaryVariables) {
   // This will be silently converted to a binary variable in SCIP.
   const Variable y = model.AddIntegerVariable(0.0, 1.0, "y");
   ASSERT_OK_AND_ASSIGN(auto solver,
-                       IncrementalSolver::New(&model, SolverType::kGscip, {}));
+                       NewIncrementalSolver(&model, SolverType::kGscip, {}));
 
   model.set_upper_bound(y, 2.0);
   EXPECT_THAT(solver->Update(), IsOkAndHolds(Not(DidUpdate())));

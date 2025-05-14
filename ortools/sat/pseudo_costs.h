@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,12 +14,17 @@
 #ifndef OR_TOOLS_SAT_PSEUDO_COSTS_H_
 #define OR_TOOLS_SAT_PSEUDO_COSTS_H_
 
+#include <limits>
+#include <string>
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
+#include "ortools/sat/linear_constraint_manager.h"
 #include "ortools/sat/linear_programming_constraint.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
@@ -98,8 +103,9 @@ class PseudoCosts {
     IntegerValue lower_bound_change = IntegerValue(0);
     double lp_increase = 0.0;
   };
-  std::vector<VariableBoundChange> GetBoundChanges(
-      Literal decision, absl::Span<const double> lp_values);
+  const std::vector<VariableBoundChange>& BoundChanges() {
+    return bound_changes_;
+  }
 
  private:
   // Returns the current objective info.
@@ -127,16 +133,16 @@ class PseudoCosts {
 
   // Current IntegerVariable pseudo costs.
   std::vector<IntegerVariable> relevant_variables_;
-  absl::StrongVector<IntegerVariable, bool> is_relevant_;
-  absl::StrongVector<IntegerVariable, double> scores_;
-  absl::StrongVector<IntegerVariable, IncrementalAverage> pseudo_costs_;
+  util_intops::StrongVector<IntegerVariable, bool> is_relevant_;
+  util_intops::StrongVector<IntegerVariable, double> scores_;
+  util_intops::StrongVector<IntegerVariable, IncrementalAverage> pseudo_costs_;
 
   // This version is mainly based on the lp relaxation.
-  absl::StrongVector<IntegerVariable, IncrementalAverage>
+  util_intops::StrongVector<IntegerVariable, IncrementalAverage>
       average_unit_objective_increase_;
 
   // This version is based on objective increase explanation.
-  absl::StrongVector<LiteralIndex, IncrementalAverage> lit_pseudo_costs_;
+  util_intops::StrongVector<LiteralIndex, IncrementalAverage> lit_pseudo_costs_;
 };
 
 }  // namespace sat
