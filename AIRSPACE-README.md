@@ -5,9 +5,9 @@ It has Go bindings and binaries for use with Go projects.
 
 ## Install (Mac)
  1. Download binaries for Mac:
-    `https://github.com/AirspaceTechnologies/or-tools/releases/download/v9.12-go1.24.3/or-tools_universal_macOS-14.6.1_go_v9.12.4600.tar.gz`
+    `https://github.com/AirspaceTechnologies/or-tools/releases/download/v9.12-go1.24.3/or-tools_universal_macOS-14.6.1_go_v9.12.4602.tar.gz`
  1. Install/extract to `/usr/local/lib`:
-    `sudo tar -xf or-tools_universal_macOS-14.6.1_go_v9.12.4600.tar.gz --strip 1 -C /usr/local/lib`
+    `sudo tar -xf or-tools_universal_macOS-14.6.1_go_v9.12.4602.tar.gz --strip 1 -C /usr/local/lib`
  1. Clean module download cache if necessary:
     `go clean --modcache`
 
@@ -46,7 +46,7 @@ It has Go bindings and binaries for use with Go projects.
   1. Create universal Mac binaries:
      `sh universal.sh -a [arm64 tar ball] -x [x86_64 tar ball] -o [output tar ball]`
 
-     For example: `sh universal.sh -a export/or-tools_arm64_macOS-14.6.1_go_v9.12.4600.tar.gz -x export/or-tools_x86_64_macOS-14.6.1_go_v9.12.4600.tar.gz -o export/or-tools_universal_macOS-14.6.1_go_v9.12.4600.tar.gz`
+     For example: `sh universal.sh -a export/or-tools_arm64_macOS-14.6.1_go_v9.12.4602.tar.gz -x export/or-tools_x86_64_macOS-14.6.1_go_v9.12.4602.tar.gz -o export/or-tools_universal_macOS-14.6.1_go_v9.12.4602.tar.gz`
   1. For Linux x86_64 (takes ~45 mins, uses Docker to build everything from scratch):
      `sh tools/release/build_delivery_airspace.sh`
   1. Log into Github and create a release with the resulting binaries in the `export` directory
