@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,7 +19,6 @@
 #include <memory>
 #include <optional>
 #include <ostream>
-#include <type_traits>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
@@ -536,7 +535,7 @@ TEST_P(LpIncompleteSolveTest, PrimalSimplexAlgorithm) {
 
   ASSERT_OK_AND_ASSIGN(
       const std::unique_ptr<IncrementalSolver> incremental_solver,
-      IncrementalSolver::New(&model, TestedSolver()));
+      NewIncrementalSolver(&model, TestedSolver()));
   SolveArguments args;
   args.parameters.lp_algorithm = GetParam().lp_algorithm;
   if (GetParam().supports_presolve) {
@@ -705,7 +704,7 @@ TEST_P(LpIncompleteSolveTest, PrimalSimplexAlgorithmRanged) {
   LinearConstraint c = model.AddLinearConstraint(Sum(x) >= 1);
   ASSERT_OK_AND_ASSIGN(
       const std::unique_ptr<IncrementalSolver> incremental_solver,
-      IncrementalSolver::New(&model, TestedSolver()));
+      NewIncrementalSolver(&model, TestedSolver()));
 
   SolveArguments args;
   args.parameters.lp_algorithm = LPAlgorithm::kPrimalSimplex;
@@ -963,7 +962,7 @@ TEST_P(LpIncompleteSolveTest, DualSimplexAlgorithmIncrementalCut) {
   model.Maximize(Sum(x));
   ASSERT_OK_AND_ASSIGN(
       const std::unique_ptr<IncrementalSolver> incremental_solver,
-      IncrementalSolver::New(&model, TestedSolver()));
+      NewIncrementalSolver(&model, TestedSolver()));
 
   ASSERT_OK(incremental_solver->Solve());
 
@@ -1109,7 +1108,7 @@ TEST_P(LpIncompleteSolveTest, PhaseIDualSimplexAlgorithm) {
 
   ASSERT_OK_AND_ASSIGN(
       const std::unique_ptr<IncrementalSolver> incremental_solver,
-      IncrementalSolver::New(&model, TestedSolver()));
+      NewIncrementalSolver(&model, TestedSolver()));
   SolveArguments args;
   args.parameters.lp_algorithm = GetParam().lp_algorithm;
   if (GetParam().supports_presolve) {

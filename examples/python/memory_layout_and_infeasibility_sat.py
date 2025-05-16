@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -54,8 +54,10 @@ def solve_hard_model(output_proto: str, params: str) -> bool:
     y_starts: List[cp_model.IntVar] = []
     y_intervals: List[cp_model.IntervalVar] = []
 
-    for start, end, demand, unused_alignment in DEMANDS:
-        x_interval = model.new_fixed_size_interval_var(start, end - start + 1, "")
+    for start_time, end_time, demand, _ in DEMANDS:
+        x_interval = model.new_fixed_size_interval_var(
+            start_time, end_time - start_time + 1, ""
+        )
         y_start = model.new_int_var(0, CAPACITY - demand, "")
         y_interval = model.new_fixed_size_interval_var(y_start, demand, "")
 
@@ -74,9 +76,9 @@ def solve_hard_model(output_proto: str, params: str) -> bool:
     status = solver.solve(model)
     print(solver.response_stats())
 
-    if status == cp_model.FEASIBLE or status == cp_model.OPTIMAL:
-        for index, start in enumerate(y_starts):
-            print(f"task {index} buffer starts at {solver.value(start)}")
+    if status in (cp_model.FEASIBLE, cp_model.OPTIMAL):
+        for index, start_var in enumerate(y_starts):
+            print(f"task {index} buffer starts at {solver.value(start_var)}")
 
     return status != cp_model.INFEASIBLE
 

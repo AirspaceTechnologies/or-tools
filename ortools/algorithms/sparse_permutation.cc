@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/str_join.h"
@@ -66,7 +67,7 @@ std::string SparsePermutation::DebugString() const {
     std::vector<int> cycle;
     for (int i = min_pos; i < end; ++i) cycle.push_back(cycles_[i]);
     for (int i = start; i < min_pos; ++i) cycle.push_back(cycles_[i]);
-    cycles.push_back(cycle);
+    cycles.push_back(std::move(cycle));
     start = end;
   }
   std::sort(cycles.begin(), cycles.end());
@@ -78,6 +79,32 @@ std::string SparsePermutation::DebugString() const {
     out += ")";
   }
   return out;
+}
+
+int SparsePermutation::Image(int element) const {
+  for (int c = 0; c < NumCycles(); ++c) {
+    int cur_element = LastElementInCycle(c);
+    for (int image : Cycle(c)) {
+      if (cur_element == element) {
+        return image;
+      }
+      cur_element = image;
+    }
+  }
+  return element;
+}
+
+int SparsePermutation::InverseImage(int element) const {
+  for (int c = 0; c < NumCycles(); ++c) {
+    int cur_element = LastElementInCycle(c);
+    for (int image : Cycle(c)) {
+      if (image == element) {
+        return cur_element;
+      }
+      cur_element = image;
+    }
+  }
+  return element;
 }
 
 }  // namespace operations_research

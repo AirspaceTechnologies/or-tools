@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,10 +21,10 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
-#include "absl/random/distributions.h"
 #include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/stl_util.h"
@@ -124,7 +124,9 @@ bool Inprocessing::PresolveLoop(SatPresolveOptions options) {
     // TODO(user): Combine the two? this way we don't create a full literal <->
     // clause graph twice. It might make sense to reach the BCE fix point which
     // is unique before each variable elimination.
-    blocked_clause_simplifier_->DoOneRound(log_round_info);
+    if (!params_.fill_tightened_domains_in_response()) {
+      blocked_clause_simplifier_->DoOneRound(log_round_info);
+    }
 
     // TODO(user): this break some binary graph invariant. Fix!
     RETURN_IF_FALSE(RemoveFixedAndEquivalentVariables(log_round_info));
@@ -169,6 +171,7 @@ bool Inprocessing::PresolveLoop(SatPresolveOptions options) {
 
 bool Inprocessing::InprocessingRound() {
   DCHECK_EQ(sat_solver_->CurrentDecisionLevel(), 0);
+  if (sat_solver_->ModelIsUnsat()) return false;
   WallTimer wall_timer;
   wall_timer.Start();
 
@@ -188,6 +191,9 @@ bool Inprocessing::InprocessingRound() {
   }
 
   // Try to spend a given ratio of time in the inprocessing.
+  //
+  // TODO(user): Tune the heuristic, in particular, with the current code we
+  // start some inprocessing before the first search.
   const double diff = start_dtime - reference_dtime_;
   if (total_dtime_ > params_.inprocessing_dtime_ratio() * diff) {
     return true;
@@ -366,7 +372,7 @@ bool Inprocessing::RemoveFixedAndEquivalentVariables(bool log_info) {
 
   // Used to mark clause literals.
   const int num_literals(sat_solver_->NumVariables() * 2);
-  absl::StrongVector<LiteralIndex, bool> marked(num_literals, false);
+  util_intops::StrongVector<LiteralIndex, bool> marked(num_literals, false);
 
   clause_manager_->DeleteRemovedClauses();
   clause_manager_->DetachAllClauses();
@@ -472,8 +478,8 @@ bool Inprocessing::SubsumeAndStrenghtenRound(bool log_info) {
 
   // Clause index in clauses.
   // TODO(user): Storing signatures here might be faster?
-  absl::StrongVector<LiteralIndex, absl::InlinedVector<int, 6>> one_watcher(
-      num_literals.value());
+  util_intops::StrongVector<LiteralIndex, absl::InlinedVector<int, 6>>
+      one_watcher(num_literals.value());
 
   // Clause signatures in the same order as clauses.
   std::vector<uint64_t> signatures(clauses.size());
@@ -699,8 +705,8 @@ bool StampingSimplifier::ComputeStampsForNextRound(bool log_info) {
 
   // TODO(user): compute some dtime, it is always zero currently.
   time_limit_->AdvanceDeterministicTime(dtime_);
-  LOG_IF(INFO, log_info) << "Prestamping." << " num_fixed: " << num_fixed_
-                         << " dtime: " << dtime_
+  LOG_IF(INFO, log_info) << "Prestamping."
+                         << " num_fixed: " << num_fixed_ << " dtime: " << dtime_
                          << " wtime: " << wall_timer.Get();
   return true;
 }
@@ -1190,6 +1196,8 @@ bool BoundedVariableElimination::DoOneRound(bool log_info) {
 
   need_to_be_updated_.clear();
   in_need_to_be_updated_.resize(num_variables);
+  DCHECK(absl::c_find(in_need_to_be_updated_, true) ==
+         in_need_to_be_updated_.end());
   queue_.Reserve(num_variables);
   for (BooleanVariable v(0); v < num_variables; ++v) {
     if (assignment_.VariableIsAssigned(v)) continue;
@@ -1227,7 +1235,6 @@ bool BoundedVariableElimination::DoOneRound(bool log_info) {
       // Currently we never re-add top if we just processed it.
       if (v != top) UpdatePriorityQueue(v);
     }
-    in_need_to_be_updated_.clear();
     need_to_be_updated_.clear();
   }
 
@@ -1254,7 +1261,8 @@ bool BoundedVariableElimination::DoOneRound(bool log_info) {
   dtime_ += 1e-8 * num_inspected_literals_;
   time_limit_->AdvanceDeterministicTime(dtime_);
   log_info |= VLOG_IS_ON(1);
-  LOG_IF(INFO, log_info) << "BVE." << " num_fixed: "
+  LOG_IF(INFO, log_info) << "BVE."
+                         << " num_fixed: "
                          << trail_->Index() - saved_trail_index
                          << " num_simplified_literals: " << num_simplifications_
                          << " num_blocked_clauses_: " << num_blocked_clauses_

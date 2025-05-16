@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,8 +21,11 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/meta/type_traits.h"
+#include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/graph/strongly_connected_components.h"
+#include "ortools/sat/all_different.h"
+#include "ortools/sat/clause.h"
 #include "ortools/sat/integer.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
@@ -33,9 +36,9 @@ namespace operations_research {
 namespace sat {
 
 CircuitPropagator::CircuitPropagator(const int num_nodes,
-                                     const std::vector<int>& tails,
-                                     const std::vector<int>& heads,
-                                     const std::vector<Literal>& literals,
+                                     absl::Span<const int> tails,
+                                     absl::Span<const int> heads,
+                                     absl::Span<const Literal> literals,
                                      Options options, Model* model)
     : num_nodes_(num_nodes),
       options_(options),
@@ -48,10 +51,15 @@ CircuitPropagator::CircuitPropagator(const int num_nodes,
   must_be_in_cycle_.resize(num_nodes_);
   absl::flat_hash_map<LiteralIndex, int> literal_to_watch_index;
 
+  // Temporary data to fill watch_index_to_arcs_.
   const int num_arcs = tails.size();
+  std::vector<int> keys;
+  std::vector<Arc> values;
+  keys.reserve(num_arcs);
+  values.reserve(num_arcs);
+
   graph_.reserve(num_arcs);
-  self_arcs_.resize(num_nodes_,
-                    model->GetOrCreate<IntegerEncoder>()->GetFalseLiteral());
+  self_arcs_.resize(num_nodes_, kFalseLiteralIndex);
   for (int arc = 0; arc < num_arcs; ++arc) {
     const int head = heads[arc];
     const int tail = tails[arc];
@@ -59,7 +67,7 @@ CircuitPropagator::CircuitPropagator(const int num_nodes,
     if (assignment_.LiteralIsFalse(literal)) continue;
 
     if (tail == head) {
-      self_arcs_[tail] = literal;
+      self_arcs_[tail] = literal.Index();
     } else {
       graph_[{tail, head}] = literal;
     }
@@ -83,13 +91,16 @@ CircuitPropagator::CircuitPropagator(const int num_nodes,
       watch_index = watch_index_to_literal_.size();
       literal_to_watch_index[watched_literal.Index()] = watch_index;
       watch_index_to_literal_.push_back(watched_literal);
-      watch_index_to_arcs_.push_back(std::vector<Arc>());
     }
-    watch_index_to_arcs_[watch_index].push_back({tail, head});
+
+    keys.push_back(watch_index);
+    values.push_back({tail, head});
   }
+  watch_index_to_arcs_.ResetFromFlatMapping(keys, values);
 
   for (int node = 0; node < num_nodes_; ++node) {
-    if (assignment_.LiteralIsFalse(self_arcs_[node])) {
+    if (self_arcs_[node] == kFalseLiteralIndex ||
+        assignment_.LiteralIsFalse(Literal(self_arcs_[node]))) {
       // For the multiple_subcircuit_through_zero case, must_be_in_cycle_ will
       // be const and only contains zero.
       if (node == 0 || !options_.multiple_subcircuit_through_zero) {
@@ -272,7 +283,7 @@ bool CircuitPropagator::Propagate() {
       const int node = must_be_in_cycle_[i];
       if (!in_current_path_[node]) {
         miss_some_nodes = true;
-        extra_reason = self_arcs_[node].Index();
+        extra_reason = self_arcs_[node];
         break;
       }
     }
@@ -312,7 +323,10 @@ bool CircuitPropagator::Propagate() {
     BooleanVariable variable_with_same_reason = kNoBooleanVariable;
     for (int node = 0; node < num_nodes_; ++node) {
       if (in_current_path_[node]) continue;
-      if (assignment_.LiteralIsTrue(self_arcs_[node])) continue;
+      if (self_arcs_[node] >= 0 &&
+          assignment_.LiteralIsTrue(Literal(self_arcs_[node]))) {
+        continue;
+      }
 
       // This shouldn't happen because ExactlyOnePerRowAndPerColumn() should
       // have executed first and propagated self_arcs_[node] to false.
@@ -321,9 +335,12 @@ bool CircuitPropagator::Propagate() {
       // We should have detected that above (miss_some_nodes == true). But we
       // still need this for corner cases where the same literal is used for
       // many arcs, and we just propagated it here.
-      if (assignment_.LiteralIsFalse(self_arcs_[node])) {
+      if (self_arcs_[node] == kFalseLiteralIndex ||
+          assignment_.LiteralIsFalse(Literal(self_arcs_[node]))) {
         FillReasonForPath(start_node, trail_->MutableConflict());
-        trail_->MutableConflict()->push_back(self_arcs_[node]);
+        if (self_arcs_[node] != kFalseLiteralIndex) {
+          trail_->MutableConflict()->push_back(Literal(self_arcs_[node]));
+        }
         return false;
       }
 
@@ -342,10 +359,9 @@ bool CircuitPropagator::Propagate() {
   return true;
 }
 
-NoCyclePropagator::NoCyclePropagator(int num_nodes,
-                                     const std::vector<int>& tails,
-                                     const std::vector<int>& heads,
-                                     const std::vector<Literal>& literals,
+NoCyclePropagator::NoCyclePropagator(int num_nodes, absl::Span<const int> tails,
+                                     absl::Span<const int> heads,
+                                     absl::Span<const Literal> literals,
                                      Model* model)
     : num_nodes_(num_nodes),
       trail_(model->GetOrCreate<Trail>()),
@@ -469,7 +485,7 @@ bool NoCyclePropagator::Propagate() {
 
 CircuitCoveringPropagator::CircuitCoveringPropagator(
     std::vector<std::vector<Literal>> graph,
-    const std::vector<int>& distinguished_nodes, Model* model)
+    absl::Span<const int> distinguished_nodes, Model* model)
     : graph_(std::move(graph)),
       num_nodes_(graph_.size()),
       trail_(model->GetOrCreate<Trail>()) {
@@ -612,8 +628,9 @@ bool CircuitCoveringPropagator::Propagate() {
 }
 
 std::function<void(Model*)> ExactlyOnePerRowAndPerColumn(
-    const std::vector<std::vector<Literal>>& graph) {
-  return [=](Model* model) {
+    absl::Span<const std::vector<Literal>> graph) {
+  return [=, graph = std::vector<std::vector<Literal>>(
+                 graph.begin(), graph.end())](Model* model) {
     const int n = graph.size();
     std::vector<Literal> exactly_one_constraint;
     exactly_one_constraint.reserve(n);
@@ -630,52 +647,73 @@ std::function<void(Model*)> ExactlyOnePerRowAndPerColumn(
   };
 }
 
-std::function<void(Model*)> SubcircuitConstraint(
-    int num_nodes, const std::vector<int>& tails, const std::vector<int>& heads,
-    const std::vector<Literal>& literals,
-    bool multiple_subcircuit_through_zero) {
-  return [=](Model* model) {
-    const int num_arcs = tails.size();
-    CHECK_GT(num_arcs, 0);
-    CHECK_EQ(heads.size(), num_arcs);
-    CHECK_EQ(literals.size(), num_arcs);
+void LoadSubcircuitConstraint(int num_nodes, absl::Span<const int> tails,
+                              absl::Span<const int> heads,
+                              absl::Span<const Literal> literals, Model* model,
+                              bool multiple_subcircuit_through_zero) {
+  const int num_arcs = tails.size();
+  CHECK_GT(num_arcs, 0);
+  CHECK_EQ(heads.size(), num_arcs);
+  CHECK_EQ(literals.size(), num_arcs);
 
-    // If a node has no outgoing or no incoming arc, the model will be unsat
-    // as soon as we add the corresponding ExactlyOneConstraint().
-    auto sat_solver = model->GetOrCreate<SatSolver>();
+  // If a node has no outgoing or no incoming arc, the model will be unsat
+  // as soon as we add the corresponding ExactlyOneConstraint().
+  auto sat_solver = model->GetOrCreate<SatSolver>();
+  auto implications = model->GetOrCreate<BinaryImplicationGraph>();
 
-    std::vector<std::vector<Literal>> exactly_one_incoming(num_nodes);
-    std::vector<std::vector<Literal>> exactly_one_outgoing(num_nodes);
-    for (int arc = 0; arc < num_arcs; arc++) {
-      const int tail = tails[arc];
-      const int head = heads[arc];
-      exactly_one_outgoing[tail].push_back(literals[arc]);
-      exactly_one_incoming[head].push_back(literals[arc]);
+  std::vector<std::vector<Literal>> exactly_one_incoming(num_nodes);
+  std::vector<std::vector<Literal>> exactly_one_outgoing(num_nodes);
+  for (int arc = 0; arc < num_arcs; arc++) {
+    const int tail = tails[arc];
+    const int head = heads[arc];
+    exactly_one_outgoing[tail].push_back(literals[arc]);
+    exactly_one_incoming[head].push_back(literals[arc]);
+  }
+  for (int i = 0; i < exactly_one_incoming.size(); ++i) {
+    if (i == 0 && multiple_subcircuit_through_zero) continue;
+    if (!implications->AddAtMostOne(exactly_one_incoming[i])) {
+      sat_solver->NotifyThatModelIsUnsat();
+      return;
     }
-    for (int i = 0; i < exactly_one_incoming.size(); ++i) {
-      if (i == 0 && multiple_subcircuit_through_zero) continue;
-      model->Add(ExactlyOneConstraint(exactly_one_incoming[i]));
-      if (sat_solver->ModelIsUnsat()) return;
+    sat_solver->AddProblemClause(exactly_one_incoming[i]);
+    if (sat_solver->ModelIsUnsat()) return;
+  }
+  for (int i = 0; i < exactly_one_outgoing.size(); ++i) {
+    if (i == 0 && multiple_subcircuit_through_zero) continue;
+    if (!implications->AddAtMostOne(exactly_one_outgoing[i])) {
+      sat_solver->NotifyThatModelIsUnsat();
+      return;
     }
-    for (int i = 0; i < exactly_one_outgoing.size(); ++i) {
-      if (i == 0 && multiple_subcircuit_through_zero) continue;
-      model->Add(ExactlyOneConstraint(exactly_one_outgoing[i]));
-      if (sat_solver->ModelIsUnsat()) return;
-    }
+    sat_solver->AddProblemClause(exactly_one_outgoing[i]);
+    if (sat_solver->ModelIsUnsat()) return;
+  }
 
-    CircuitPropagator::Options options;
-    options.multiple_subcircuit_through_zero = multiple_subcircuit_through_zero;
-    CircuitPropagator* constraint = new CircuitPropagator(
-        num_nodes, tails, heads, literals, options, model);
+  CircuitPropagator::Options options;
+  options.multiple_subcircuit_through_zero = multiple_subcircuit_through_zero;
+  CircuitPropagator* constraint =
+      new CircuitPropagator(num_nodes, tails, heads, literals, options, model);
+  constraint->RegisterWith(model->GetOrCreate<GenericLiteralWatcher>());
+  model->TakeOwnership(constraint);
+
+  // TODO(user): Just ignore node zero if multiple_subcircuit_through_zero is
+  // true.
+  if (model->GetOrCreate<SatParameters>()->use_all_different_for_circuit() &&
+      !multiple_subcircuit_through_zero) {
+    AllDifferentConstraint* constraint =
+        new AllDifferentConstraint(num_nodes, tails, heads, literals, model);
     constraint->RegisterWith(model->GetOrCreate<GenericLiteralWatcher>());
     model->TakeOwnership(constraint);
-  };
+  }
 }
 
 std::function<void(Model*)> CircuitCovering(
-    const std::vector<std::vector<Literal>>& graph,
-    const std::vector<int>& distinguished_nodes) {
-  return [=](Model* model) {
+    absl::Span<const std::vector<Literal>> graph,
+    absl::Span<const int> distinguished_nodes) {
+  return [=,
+          distinguished_nodes = std::vector<int>(distinguished_nodes.begin(),
+                                                 distinguished_nodes.end()),
+          graph = std::vector<std::vector<Literal>>(
+              graph.begin(), graph.end())](Model* model) {
     CircuitCoveringPropagator* constraint =
         new CircuitCoveringPropagator(graph, distinguished_nodes, model);
     constraint->RegisterWith(model->GetOrCreate<GenericLiteralWatcher>());

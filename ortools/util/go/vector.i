@@ -82,7 +82,7 @@ func swigCopy##name##SliceIn(s []goname) []gonameim {
     return newSlice
 }
 
-func swigCopy##name##SliceIn2d(s [][]goname, p runtime.Pinner) [][]gonameim {
+func swigCopy##name##SliceIn2d(s [][]goname, p *runtime.Pinner) [][]gonameim {
     newSlice := make([][]gonameim, len(s))
     for i := range newSlice {
         newSlice[i] = swigCopy##name##SliceIn(s[i])
@@ -127,7 +127,7 @@ func swigCopy##name##SliceOut2d(s *[][]gonameim) [][]goname {
 %typemap(goin) std::vector<std::vector< ns name ref >> %{
     var p runtime.Pinner
     defer p.Unpin()
-    $result = swigCopy##name##SliceIn2d($input, p)
+    $result = swigCopy##name##SliceIn2d($input, &p)
 %}
 
 %typemap(in) std::vector< ns name ref > %{
@@ -166,7 +166,7 @@ func swigCopy##name##SliceOut2d(s *[][]gonameim) [][]goname {
 %typemap(goin) const std::vector<std::vector< ns name ref >> & %{
     var p runtime.Pinner
     defer p.Unpin()
-    $result = swigCopy##name##SliceIn2d($input, p)
+    $result = swigCopy##name##SliceIn2d($input, &p)
 %}
 
 %typemap(in) const std::vector< ns name ref > & %{

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <limits>
 
+#include "absl/log/check.h"
 #include "absl/types/span.h"
 #include "ortools/algorithms/set_cover_invariant.h"
 #include "ortools/algorithms/set_cover_model.h"
@@ -25,14 +26,31 @@
 
 namespace operations_research {
 
+namespace {
+// Returns the vector a - b.
+ElementToIntVector Subtract(const ElementToIntVector& a,
+                            const ElementToIntVector& b) {
+  ElementToIntVector delta(a.size());
+  DCHECK_EQ(a.size(), b.size());
+  for (const ElementIndex i : a.index_range()) {
+    delta[i] = a[i] - b[i];
+  }
+  return delta;
+}
+}  // namespace
+
 template <typename IndexType, typename ValueType>
 using StrictVector = glop::StrictITIVector<IndexType, ValueType>;
 
-bool SetCoverMip::NextSolution() {
-  return NextSolution(inv_->model()->all_subsets());
+bool SetCoverMip::NextSolution(bool use_integers,
+                               double time_limit_in_seconds) {
+  return NextSolution(inv_->model()->all_subsets(), use_integers,
+                      time_limit_in_seconds);
 }
 
-bool SetCoverMip::NextSolution(absl::Span<const SubsetIndex> focus) {
+bool SetCoverMip::NextSolution(absl::Span<const SubsetIndex> focus,
+                               bool use_integers,
+                               double time_limit_in_seconds) {
   SetCoverModel* model = inv_->model();
   const SubsetIndex num_subsets(model->num_subsets());
   const ElementIndex num_elements(model->num_elements());
@@ -43,10 +61,30 @@ bool SetCoverMip::NextSolution(absl::Span<const SubsetIndex> focus) {
       problem_type = MPSolver::SCIP_MIXED_INTEGER_PROGRAMMING;
       break;
     case SetCoverMipSolver::GUROBI:
-      problem_type = MPSolver::GUROBI_MIXED_INTEGER_PROGRAMMING;
+      if (use_integers) {
+        problem_type = MPSolver::GUROBI_MIXED_INTEGER_PROGRAMMING;
+      } else {
+        problem_type = MPSolver::GUROBI_LINEAR_PROGRAMMING;
+      }
       break;
     case SetCoverMipSolver::SAT:
+      if (!use_integers) {
+        LOG(INFO) << "Defaulting to integer variables with SAT";
+        use_integers = true;
+      }
       problem_type = MPSolver::SAT_INTEGER_PROGRAMMING;
+      break;
+    case SetCoverMipSolver::GLOP:
+      LOG(INFO) << "Defaulting to linear relaxation with GLOP";
+      use_integers = false;
+      problem_type = MPSolver::GLOP_LINEAR_PROGRAMMING;
+      break;
+    case SetCoverMipSolver::PDLP:
+      if (use_integers) {
+        LOG(INFO) << "Defaulting to linear relaxation with PDLP";
+        use_integers = false;
+      }
+      problem_type = MPSolver::PDLP_LINEAR_PROGRAMMING;
       break;
     default:
       LOG(WARNING) << "Unknown solver value, defaulting to SCIP";
@@ -64,11 +102,15 @@ bool SetCoverMip::NextSolution(absl::Span<const SubsetIndex> focus) {
 
   StrictVector<ElementIndex, MPConstraint*> constraints(num_elements, nullptr);
   StrictVector<SubsetIndex, MPVariable*> vars(num_subsets, nullptr);
+  ElementToIntVector coverage_outside_focus =
+      Subtract(inv_->coverage(), inv_->ComputeCoverageInFocus(focus));
   for (const SubsetIndex subset : focus) {
-    vars[subset] = solver.MakeBoolVar("");
+    vars[subset] = solver.MakeVar(0, 1, use_integers, "");
     objective->SetCoefficient(vars[subset], model->subset_costs()[subset]);
-    for (ElementIndex element : model->columns()[subset]) {
-      if (inv_->coverage()[element] > 0) continue;
+    for (const ElementIndex element : model->columns()[subset]) {
+      // The model should only contain elements that are not forcibly covered by
+      // subsets outside the focus.
+      if (coverage_outside_focus[element] != 0) continue;
       if (constraints[element] == nullptr) {
         constexpr double kInfinity = std::numeric_limits<double>::infinity();
         constraints[element] = solver.MakeRowConstraint(1.0, kInfinity);
@@ -77,7 +119,7 @@ bool SetCoverMip::NextSolution(absl::Span<const SubsetIndex> focus) {
     }
   }
   // set_time_limit takes milliseconds as a unit.
-  solver.set_time_limit(static_cast<int64_t>(time_limit_in_seconds_ * 1000));
+  solver.set_time_limit(static_cast<int64_t>(time_limit_in_seconds * 1000));
 
   // Call the solver.
   const MPSolver::ResultStatus solve_status = solver.Solve();
@@ -96,10 +138,16 @@ bool SetCoverMip::NextSolution(absl::Span<const SubsetIndex> focus) {
       LOG(ERROR) << "Solving resulted in an error.";
       return false;
   }
-  for (const SubsetIndex subset : focus) {
-    choices[subset] = (vars[subset]->solution_value() > 0.9);
+  if (use_integers) {
+    using CL = SetCoverInvariant::ConsistencyLevel;
+    for (const SubsetIndex subset : focus) {
+      if (vars[subset]->solution_value() > 0.9) {
+        inv_->Select(subset, CL::kCostAndCoverage);
+      }
+    }
+  } else {
+    lower_bound_ = solver.Objective().Value();
   }
-  inv_->LoadSolution(choices);
   return true;
 }
 

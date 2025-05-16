@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -22,6 +22,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/random/distributions.h"
+#include "absl/types/span.h"
 #include "gtest/gtest.h"
 #include "ortools/base/macros.h"
 #include "ortools/base/map_util.h"
@@ -51,7 +52,7 @@ void GenericCheck(const int expected_assignment_size,
   }
 }
 
-void TestMinimization(const std::vector<std::vector<double>>& cost,
+void TestMinimization(absl::Span<const std::vector<double>> cost,
                       const int expected_assignment_size,
                       const int expected_agents[], const int expected_tasks[]) {
   absl::flat_hash_map<int, int> direct_assignment;
@@ -62,7 +63,7 @@ void TestMinimization(const std::vector<std::vector<double>>& cost,
                expected_agents, expected_tasks);
 }
 
-void TestMaximization(const std::vector<std::vector<double>>& cost,
+void TestMaximization(absl::Span<const std::vector<double>> cost,
                       const int expected_assignment_size,
                       const int expected_agents[], const int expected_tasks[]) {
   absl::flat_hash_map<int, int> direct_assignment;

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -353,7 +353,8 @@ void PortfolioOptimizer::CreateOptimizers(
 // OptimizerSelector
 //------------------------------------------------------------------------------
 OptimizerSelector::OptimizerSelector(
-    const absl::StrongVector<OptimizerIndex, BopOptimizerBase*>& optimizers)
+    const util_intops::StrongVector<OptimizerIndex, BopOptimizerBase*>&
+        optimizers)
     : run_infos_(), selected_index_(optimizers.size()) {
   for (OptimizerIndex i(0); i < optimizers.size(); ++i) {
     info_positions_.push_back(run_infos_.size());

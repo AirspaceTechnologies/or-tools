@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,13 +14,15 @@
 #include "ortools/sat/timetable_edgefinding.h"
 
 #include <algorithm>
+#include <limits>
 #include <vector>
 
 #include "absl/log/check.h"
 #include "ortools/base/iterator_adaptors.h"
 #include "ortools/sat/integer.h"
-#include "ortools/sat/intervals.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/model.h"
+#include "ortools/sat/scheduling_helpers.h"
 #include "ortools/util/strong_integers.h"
 
 namespace operations_research {
@@ -47,7 +49,7 @@ TimeTableEdgeFinding::TimeTableEdgeFinding(AffineExpression capacity,
 void TimeTableEdgeFinding::RegisterWith(GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
   watcher->WatchUpperBound(capacity_, id);
-  helper_->WatchAllTasks(id, watcher);
+  helper_->WatchAllTasks(id);
   for (int t = 0; t < num_tasks_; t++) {
     watcher->WatchLowerBound(demands_->Demands()[t], id);
   }
@@ -68,12 +70,12 @@ void TimeTableEdgeFinding::BuildTimeTable() {
   ecp_.clear();
 
   // Build start of compulsory part events.
-  const auto by_decreasing_start_max = helper_->TaskByDecreasingStartMax();
-  for (const auto task_time : ::gtl::reversed_view(by_decreasing_start_max)) {
-    const int t = task_time.task_index;
+  const auto by_negated_smax = helper_->TaskByIncreasingNegatedStartMax();
+  for (const auto [t, negated_smax] : ::gtl::reversed_view(by_negated_smax)) {
     if (!helper_->IsPresent(t)) continue;
-    if (task_time.time < helper_->EndMin(t)) {
-      scp_.push_back(task_time);
+    const IntegerValue start_max = -negated_smax;
+    if (start_max < helper_->EndMin(t)) {
+      scp_.push_back({t, start_max});
     }
   }
 
@@ -149,8 +151,11 @@ void TimeTableEdgeFinding::BuildTimeTable() {
 }
 
 bool TimeTableEdgeFinding::TimeTableEdgeFindingPass() {
-  demands_->CacheAllEnergyValues();
+  if (!demands_->CacheAllEnergyValues()) return true;
 
+  IntegerValue earliest_start_min = std::numeric_limits<IntegerValue>::max();
+  IntegerValue latest_end_max = std::numeric_limits<IntegerValue>::min();
+  IntegerValue maximum_demand_min = IntegerValue(0);
   // Initialize the data structures and build the free parts.
   // --------------------------------------------------------
   for (int t = 0; t < num_tasks_; ++t) {
@@ -159,6 +164,10 @@ bool TimeTableEdgeFinding::TimeTableEdgeFindingPass() {
     const IntegerValue end_min = helper_->EndMin(t);
     const IntegerValue demand_min = demands_->DemandMin(t);
     IntegerValue mandatory_energy(0);
+
+    earliest_start_min = std::min(earliest_start_min, helper_->StartMin(t));
+    latest_end_max = std::max(latest_end_max, helper_->EndMax(t));
+    maximum_demand_min = std::max(maximum_demand_min, demand_min);
 
     if (start_max >= end_min) {
       size_free_[t] = helper_->SizeMin(t);
@@ -171,6 +180,12 @@ bool TimeTableEdgeFinding::TimeTableEdgeFindingPass() {
     const IntegerValue min_energy = demands_->EnergyMin(t);
     energy_free_[t] = min_energy - mandatory_energy;
     DCHECK_GE(energy_free_[t], 0);
+  }
+
+  if (AtMinOrMaxInt64I(CapProdI(CapSubI(latest_end_max, earliest_start_min),
+                                maximum_demand_min))) {
+    // Avoid possible overflow.
+    return true;
   }
 
   // TODO(user): Is it possible to have a 'higher' mandatory profile using

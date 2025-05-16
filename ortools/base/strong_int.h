@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -153,6 +153,7 @@
 #include <type_traits>
 
 #include "absl/base/port.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "ortools/base/macros.h"
 
@@ -296,6 +297,23 @@ template <typename StrongIntName, typename ValueType>
 std::ostream& operator<<(std::ostream& os,  // NOLINT
                          StrongInt<StrongIntName, ValueType> arg) {
   return os << arg.value();
+}
+
+// Define AbslStringify, for absl::StrAppend, absl::StrCat, and absl::StrFormat.
+//
+// When using StrongInt with absl::StrFormat, use the "%v" specifier.
+template <typename Sink, typename... T>
+void AbslStringify(Sink& sink, StrongInt<T...> arg) {
+  using ValueType = typename decltype(arg)::ValueType;
+  // int8_t/uint8_t are not supported by the "%v" specifier due to it being
+  // ambiguous whether an integer or character should be printed.
+  if constexpr (std::is_same_v<ValueType, int8_t>) {
+    absl::Format(&sink, "%d", arg.value());
+  } else if constexpr (std::is_same_v<ValueType, uint8_t>) {
+    absl::Format(&sink, "%u", arg.value());
+  } else {
+    absl::Format(&sink, "%v", arg.value());
+  }
 }
 
 // -- NON-MEMBER ARITHMETIC OPERATORS ------------------------------------------

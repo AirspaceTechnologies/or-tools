@@ -1,4 +1,4 @@
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -80,6 +80,7 @@ target_link_libraries(glop_proto PRIVATE protobuf::libprotobuf)
 add_library(glop)
 target_sources(glop PRIVATE
   ortools/base/accurate_sum.h
+  ortools/base/base_export.h
   ortools/base/basictypes.h
   ortools/base/commandlineflags.h
   ortools/base/file.cc
@@ -180,7 +181,6 @@ if(MSVC)
     "/D_CRT_SECURE_NO_DEPRECATE"
     "/MP" # Build with multiple processes
     "/Zc:preprocessor" # Enable preprocessor conformance mode
-    "/DNDEBUG"
     )
   # MSVC warning suppressions
   list(APPEND GLOP_COMPILE_OPTIONS
@@ -229,6 +229,9 @@ target_compile_options(glop PUBLIC ${GLOP_COMPILE_OPTIONS})
 # Properties
 if(NOT APPLE)
   set_target_properties(glop PROPERTIES VERSION ${PROJECT_VERSION})
+  if(UNIX)
+    set_target_properties(glop PROPERTIES INSTALL_RPATH "$ORIGIN")
+  endif()
 else()
   # Clang don't support version x.y.z with z > 255
   set_target_properties(glop PROPERTIES
@@ -262,8 +265,8 @@ target_link_libraries(glop PUBLIC
   absl::strings
   absl::statusor
   absl::str_format
+  absl::random_random
   protobuf::libprotobuf
-  ${RE2_DEPS}
   )
 if(WIN32)
   #target_link_libraries(glop PUBLIC psapi.lib ws2_32.lib)
@@ -301,6 +304,7 @@ install(DIRECTORY ortools/glop
 # dependencies headers
 install(FILES
   ortools/base/accurate_sum.h
+  ortools/base/base_export.h
   ortools/base/basictypes.h
   ortools/base/commandlineflags.h
   ortools/base/file.h

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -335,7 +335,7 @@ TEST_P(CallbackTest, EventSimplex) {
   // solve, we know the starting basis. It would be simpler to set the starting
   // basis, once this is supported.
   ASSERT_OK_AND_ASSIGN(const std::unique_ptr<IncrementalSolver> solver,
-                       IncrementalSolver::New(&model, GetParam().solver_type));
+                       NewIncrementalSolver(&model, GetParam().solver_type));
   {
     ASSERT_OK_AND_ASSIGN(const SolveResult result, solver->Solve(args));
     ASSERT_THAT(result, IsOptimal(6.0));
@@ -671,6 +671,9 @@ TEST_P(CallbackTest, EventSolutionFilter) {
 }
 
 TEST_P(CallbackTest, EventNodeCut) {
+  if (GetParam().solver_type == SolverType::kGscip) {
+    GTEST_SKIP() << "This test does not work with SCIP v900";
+  }
   if (!GetParam().supported_events.contains(CallbackEvent::kMipNode)) {
     GTEST_SKIP() << "Test skipped because this solver does not support "
                     "CallbackEvent::kMipNode.";

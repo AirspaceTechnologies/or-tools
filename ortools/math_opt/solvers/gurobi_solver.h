@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -201,7 +201,7 @@ class GurobiSolver : public SolverInterface {
 
   absl::StatusOr<double> GetGurobiBestDualBound() const;
   absl::StatusOr<double> GetBestDualBound(
-      const std::vector<SolutionProto>& solutions) const;
+      absl::Span<const SolutionProto> solutions) const;
   absl::StatusOr<double> GetBestPrimalBound(
       absl::Span<const SolutionProto> solutions) const;
 
@@ -256,11 +256,13 @@ class GurobiSolver : public SolverInterface {
   GetConvexPrimalSolutionIfAvailable(
       const ModelSolveParametersProto& model_parameters);
   absl::StatusOr<SolutionAndClaim<DualSolutionProto>>
-  GetLpDualSolutionIfAvailable(
+  GetConvexDualSolutionIfAvailable(
       const ModelSolveParametersProto& model_parameters);
   absl::StatusOr<std::optional<BasisProto>> GetBasisIfAvailable();
 
-  absl::Status SetParameters(const SolveParametersProto& parameters);
+  absl::Status SetParameters(
+      const SolveParametersProto& parameters,
+      const ModelSolveParametersProto& model_parameters = {});
   absl::Status AddNewLinearConstraints(
       const LinearConstraintsProto& constraints);
   absl::Status AddNewQuadraticConstraints(
@@ -384,7 +386,8 @@ class GurobiSolver : public SolverInterface {
   absl::StatusOr<VariableEqualToExpression>
   CreateSlackVariableEqualToExpression(const LinearExpressionProto& expression);
 
-  absl::Status SetMultiObjectiveTolerances(
+  // May only be called if `is_multi_objective_mode()` is true.
+  absl::Status SetMultiObjectiveParameters(
       const ModelSolveParametersProto& model_parameters);
 
   absl::Status ResetModelParameters(

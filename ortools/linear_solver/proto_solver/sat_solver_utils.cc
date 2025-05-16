@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,6 +25,7 @@
 #include "ortools/lp_data/lp_types.h"
 #include "ortools/lp_data/proto_utils.h"
 #include "ortools/util/logging.h"
+#include "ortools/util/time_limit.h"
 
 namespace operations_research {
 
@@ -46,6 +47,9 @@ glop::ProblemStatus ApplyMipPresolveSteps(
   // We need to copy the hint because LinearProgramToMPModelProto() loose it.
   const bool hint_is_present = model->has_solution_hint();
   const auto copy_of_hint = model->solution_hint();
+
+  std::unique_ptr<TimeLimit> time_limit =
+      TimeLimit::FromParameters(glop_params);
 
   // TODO(user): Remove this back and forth conversion. We could convert
   // the LinearProgram directly to a CpModelProto, or we could have a custom
@@ -75,7 +79,9 @@ glop::ProblemStatus ApplyMipPresolveSteps(
     ADD_LP_PREPROCESSOR(glop::UnconstrainedVariablePreprocessor);
 
     for (int i = 0; i < lp_preprocessors.size(); ++i) {
+      if (time_limit->LimitReached()) break;
       auto& preprocessor = lp_preprocessors[i];
+      preprocessor->SetTimeLimit(time_limit.get());
       preprocessor->UseInMipContext();
       const bool need_postsolve = preprocessor->Run(&lp);
       names[i].resize(header.size(), ' ');  // padding.

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,9 +17,9 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
-#include <functional>
 #include <limits>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -302,27 +302,27 @@ void ActivityBoundHelper::AddAllAtMostOnes(const CpModelProto& proto) {
 int64_t ActivityBoundHelper::ComputeActivity(
     bool compute_min, absl::Span<const std::pair<int, int64_t>> terms,
     std::vector<std::array<int64_t, 2>>* conditional) {
-  tmp_terms_.clear();
-  tmp_terms_.reserve(terms.size());
+  tmp_terms_for_compute_activity_.clear();
+  tmp_terms_for_compute_activity_.reserve(terms.size());
   int64_t offset = 0;
   for (auto [lit, coeff] : terms) {
     if (compute_min) coeff = -coeff;  // Negate.
     if (coeff >= 0) {
-      tmp_terms_.push_back({lit, coeff});
+      tmp_terms_for_compute_activity_.push_back({lit, coeff});
     } else {
       // l is the same as 1 - (1 - l)
-      tmp_terms_.push_back({NegatedRef(lit), -coeff});
+      tmp_terms_for_compute_activity_.push_back({NegatedRef(lit), -coeff});
       offset += coeff;
     }
   }
   const int64_t internal_result =
-      ComputeMaxActivityInternal(tmp_terms_, conditional);
+      ComputeMaxActivityInternal(tmp_terms_for_compute_activity_, conditional);
 
   // Correct everything.
   if (conditional != nullptr) {
     const int num_terms = terms.size();
     for (int i = 0; i < num_terms; ++i) {
-      if (tmp_terms_[i].first != terms[i].first) {
+      if (tmp_terms_for_compute_activity_[i].first != terms[i].first) {
         // The true/false meaning is swapped
         std::swap((*conditional)[i][0], (*conditional)[i][1]);
       }
@@ -344,7 +344,7 @@ int64_t ActivityBoundHelper::ComputeActivity(
 // - If not, choose biggest part left. TODO(user): compute sum of coeff in part?
 void ActivityBoundHelper::PartitionIntoAmo(
     absl::Span<const std::pair<int, int64_t>> terms) {
-  amo_sums_.clear();
+  auto amo_sums = amo_sums_.ClearedView(num_at_most_ones_);
 
   const int num_terms = terms.size();
   to_sort_.clear();
@@ -352,36 +352,43 @@ void ActivityBoundHelper::PartitionIntoAmo(
   for (int i = 0; i < num_terms; ++i) {
     const Index index = IndexFromLiteral(terms[i].first);
     const int64_t coeff = terms[i].second;
+    DCHECK_GE(coeff, 0);
     if (index < amo_indices_.size()) {
       for (const int a : amo_indices_[index]) {
-        amo_sums_[a] += coeff;
+        amo_sums[a] += coeff;
       }
     }
-    to_sort_.push_back({terms[i].second, i});
+    to_sort_.push_back(
+        TermWithIndex{.coeff = coeff, .index = index, .span_index = i});
   }
-  std::sort(to_sort_.begin(), to_sort_.end(), std::greater<>());
+  std::sort(to_sort_.begin(), to_sort_.end(),
+            [](const TermWithIndex& a, const TermWithIndex& b) {
+              // We take into account the index to make the result
+              // deterministic.
+              return std::tie(a.coeff, a.index) > std::tie(b.coeff, b.index);
+            });
 
   int num_parts = 0;
   partition_.resize(num_terms);
-  used_amo_to_dense_index_.clear();
-  for (int i = 0; i < num_terms; ++i) {
-    const int original_i = to_sort_[i].second;
-    const Index index = IndexFromLiteral(terms[original_i].first);
-    const int64_t coeff = terms[original_i].second;
+  for (const TermWithIndex& term : to_sort_) {
+    const int original_i = term.span_index;
+    const Index index = term.index;
+    const int64_t coeff = term.coeff;
     int best = -1;
     int64_t best_sum = 0;
     bool done = false;
     if (index < amo_indices_.size()) {
       for (const int a : amo_indices_[index]) {
-        const auto it = used_amo_to_dense_index_.find(a);
-        if (it != used_amo_to_dense_index_.end()) {
-          partition_[original_i] = it->second;
+        // Tricky/Optim: we use negative amo_sums to indicate if this amo was
+        // already used and its dense index (we use -1 - index).
+        const int64_t sum_left = amo_sums[a];
+        if (sum_left < 0) {
+          partition_[original_i] = -sum_left - 1;
           done = true;
           break;
         }
 
-        const int64_t sum_left = amo_sums_[a];
-        amo_sums_[a] -= coeff;
+        amo_sums[a] -= coeff;
         if (sum_left > best_sum) {
           best_sum = sum_left;
           best = a;
@@ -394,7 +401,7 @@ void ActivityBoundHelper::PartitionIntoAmo(
     if (best == -1) {
       partition_[original_i] = num_parts++;
     } else {
-      used_amo_to_dense_index_[best] = num_parts;
+      amo_sums[best] = -num_parts - 1;  // "dense indexing"
       partition_[original_i] = num_parts;
       ++num_parts;
     }
@@ -406,12 +413,12 @@ void ActivityBoundHelper::PartitionIntoAmo(
 // Similar algo as above for this simpler case.
 std::vector<absl::Span<const int>>
 ActivityBoundHelper::PartitionLiteralsIntoAmo(absl::Span<const int> literals) {
-  amo_sums_.clear();
+  auto amo_sums = amo_sums_.ClearedView(num_at_most_ones_);
   for (const int ref : literals) {
     const Index index = IndexFromLiteral(ref);
     if (index < amo_indices_.size()) {
       for (const int a : amo_indices_[index]) {
-        amo_sums_[a] += 1;
+        amo_sums[a] += 1;
       }
     }
   }
@@ -419,7 +426,6 @@ ActivityBoundHelper::PartitionLiteralsIntoAmo(absl::Span<const int> literals) {
   int num_parts = 0;
   const int num_literals = literals.size();
   partition_.resize(num_literals);
-  used_amo_to_dense_index_.clear();
   for (int i = 0; i < literals.size(); ++i) {
     const Index index = IndexFromLiteral(literals[i]);
     int best = -1;
@@ -427,15 +433,17 @@ ActivityBoundHelper::PartitionLiteralsIntoAmo(absl::Span<const int> literals) {
     bool done = false;
     if (index < amo_indices_.size()) {
       for (const int a : amo_indices_[index]) {
-        const auto it = used_amo_to_dense_index_.find(a);
-        if (it != used_amo_to_dense_index_.end()) {
-          partition_[i] = it->second;
+        const int64_t sum_left = amo_sums[a];
+
+        // Tricky/Optim: we use negative amo_sums to indicate if this amo was
+        // already used and its dense index (we use -1 - index).
+        if (sum_left < 0) {
+          partition_[i] = -sum_left - 1;
           done = true;
           break;
         }
 
-        const int64_t sum_left = amo_sums_[a];
-        amo_sums_[a] -= 1;
+        amo_sums[a] -= 1;
         if (sum_left > best_sum) {
           best_sum = sum_left;
           best = a;
@@ -446,7 +454,7 @@ ActivityBoundHelper::PartitionLiteralsIntoAmo(absl::Span<const int> literals) {
 
     // New element.
     if (best != -1) {
-      used_amo_to_dense_index_[best] = num_parts;
+      amo_sums[best] = -num_parts - 1;
     }
     partition_[i] = num_parts++;
   }
@@ -458,13 +466,13 @@ ActivityBoundHelper::PartitionLiteralsIntoAmo(absl::Span<const int> literals) {
 }
 
 bool ActivityBoundHelper::IsAmo(absl::Span<const int> literals) {
-  amo_sums_.clear();
+  auto amo_sums = amo_sums_.ClearedView(num_at_most_ones_);
   for (int i = 0; i < literals.size(); ++i) {
     bool has_max_size = false;
     const Index index = IndexFromLiteral(literals[i]);
     if (index >= amo_indices_.size()) return false;
     for (const int a : amo_indices_[index]) {
-      if (amo_sums_[a]++ == i) has_max_size = true;
+      if (amo_sums[a]++ == i) has_max_size = true;
     }
     if (!has_max_size) return false;
   }

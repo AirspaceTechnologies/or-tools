@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,8 +14,6 @@
 #include "ortools/sat/disjunctive.h"
 
 #include <algorithm>
-#include <cstdint>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -25,6 +23,7 @@
 #include "ortools/base/logging.h"
 #include "ortools/sat/all_different.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/intervals.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/precedences.h"
@@ -99,31 +98,40 @@ void AddDisjunctive(const std::vector<IntervalVariable>& intervals,
   } else {
     // We decided to create the propagators in this particular order, but it
     // shouldn't matter much because of the different priorities used.
+    if (!params.use_strong_propagation_in_disjunctive()) {
+      // This one will not propagate anything if we added all precedence
+      // literals since the linear propagator will already do that in that case.
+      DisjunctiveSimplePrecedences* simple_precedences =
+          new DisjunctiveSimplePrecedences(helper, model);
+      const int id = simple_precedences->RegisterWith(watcher);
+      watcher->SetPropagatorPriority(id, 1);
+      model->TakeOwnership(simple_precedences);
+    }
     {
       // Only one direction is needed by this one.
       DisjunctiveOverloadChecker* overload_checker =
-          new DisjunctiveOverloadChecker(helper);
+          new DisjunctiveOverloadChecker(helper, model);
       const int id = overload_checker->RegisterWith(watcher);
       watcher->SetPropagatorPriority(id, 1);
       model->TakeOwnership(overload_checker);
     }
     for (const bool time_direction : {true, false}) {
       DisjunctiveDetectablePrecedences* detectable_precedences =
-          new DisjunctiveDetectablePrecedences(time_direction, helper);
+          new DisjunctiveDetectablePrecedences(time_direction, helper, model);
       const int id = detectable_precedences->RegisterWith(watcher);
       watcher->SetPropagatorPriority(id, 2);
       model->TakeOwnership(detectable_precedences);
     }
     for (const bool time_direction : {true, false}) {
       DisjunctiveNotLast* not_last =
-          new DisjunctiveNotLast(time_direction, helper);
+          new DisjunctiveNotLast(time_direction, helper, model);
       const int id = not_last->RegisterWith(watcher);
       watcher->SetPropagatorPriority(id, 3);
       model->TakeOwnership(not_last);
     }
     for (const bool time_direction : {true, false}) {
       DisjunctiveEdgeFinding* edge_finding =
-          new DisjunctiveEdgeFinding(time_direction, helper);
+          new DisjunctiveEdgeFinding(time_direction, helper, model);
       const int id = edge_finding->RegisterWith(watcher);
       watcher->SetPropagatorPriority(id, 4);
       model->TakeOwnership(edge_finding);
@@ -146,7 +154,7 @@ void AddDisjunctive(const std::vector<IntervalVariable>& intervals,
 }
 
 void AddDisjunctiveWithBooleanPrecedencesOnly(
-    const std::vector<IntervalVariable>& intervals, Model* model) {
+    absl::Span<const IntervalVariable> intervals, Model* model) {
   auto* repo = model->GetOrCreate<IntervalsRepository>();
   for (int i = 0; i < intervals.size(); ++i) {
     for (int j = i + 1; j < intervals.size(); ++j) {
@@ -181,7 +189,10 @@ void TaskSet::NotifyEntryIsNowLastIfPresent(const Entry& e) {
   for (int i = 0;; ++i) {
     if (i == size) return;
     if (sorted_tasks_[i].task == e.task) {
-      sorted_tasks_.erase(sorted_tasks_.begin() + i);
+      for (int j = i; j + 1 < size; ++j) {
+        sorted_tasks_[j] = sorted_tasks_[j + 1];
+      }
+      sorted_tasks_.pop_back();
       break;
     }
   }
@@ -256,9 +267,23 @@ bool DisjunctiveWithTwoItems::Propagate() {
   // interval forced absence? Same for the start-max.
   int task_before = 0;
   int task_after = 1;
-  if (helper_->StartMax(0) < helper_->EndMin(1)) {
+
+  const bool task_0_before_task_1 = helper_->StartMax(0) < helper_->EndMin(1);
+  const bool task_1_before_task_0 = helper_->StartMax(1) < helper_->EndMin(0);
+
+  if (task_0_before_task_1 && task_1_before_task_0 &&
+      helper_->IsPresent(task_before) && helper_->IsPresent(task_after)) {
+    helper_->ClearReason();
+    helper_->AddPresenceReason(task_before);
+    helper_->AddPresenceReason(task_after);
+    helper_->AddReasonForBeingBefore(task_before, task_after);
+    helper_->AddReasonForBeingBefore(task_after, task_before);
+    return helper_->ReportConflict();
+  }
+
+  if (task_0_before_task_1) {
     // Task 0 must be before task 1.
-  } else if (helper_->StartMax(1) < helper_->EndMin(0)) {
+  } else if (task_1_before_task_0) {
     // Task 1 must be before task 0.
     std::swap(task_before, task_after);
   } else {
@@ -302,20 +327,20 @@ bool DisjunctiveWithTwoItems::Propagate() {
 
 int DisjunctiveWithTwoItems::RegisterWith(GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
-  helper_->WatchAllTasks(id, watcher);
+  helper_->WatchAllTasks(id);
   watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
   return id;
 }
 
 template <bool time_direction>
 CombinedDisjunctive<time_direction>::CombinedDisjunctive(Model* model)
-    : helper_(model->GetOrCreate<AllIntervalsHelper>()) {
+    : helper_(model->GetOrCreate<IntervalsRepository>()->GetOrCreateHelper(
+          model->GetOrCreate<IntervalsRepository>()->AllIntervals())) {
   task_to_disjunctives_.resize(helper_->NumTasks());
 
   auto* watcher = model->GetOrCreate<GenericLiteralWatcher>();
   const int id = watcher->Register(this);
-  helper_->WatchAllTasks(id, watcher, /*watch_start_max=*/true,
-                         /*watch_end_max=*/false);
+  helper_->WatchAllTasks(id);
   watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
 }
 
@@ -334,8 +359,8 @@ template <bool time_direction>
 bool CombinedDisjunctive<time_direction>::Propagate() {
   if (!helper_->SynchronizeAndSetTimeDirection(time_direction)) return false;
   const auto& task_by_increasing_end_min = helper_->TaskByIncreasingEndMin();
-  const auto& task_by_decreasing_start_max =
-      helper_->TaskByDecreasingStartMax();
+  const auto& task_by_negated_start_max =
+      helper_->TaskByIncreasingNegatedStartMax();
 
   for (auto& task_set : task_sets_) task_set.Clear();
   end_mins_.assign(end_mins_.size(), kMinIntegerValue);
@@ -351,9 +376,9 @@ bool CombinedDisjunctive<time_direction>::Propagate() {
 
     // Update all task sets.
     while (queue_index >= 0) {
-      const auto to_insert = task_by_decreasing_start_max[queue_index];
+      const auto to_insert = task_by_negated_start_max[queue_index];
       const int task_index = to_insert.task_index;
-      const IntegerValue start_max = to_insert.time;
+      const IntegerValue start_max = -to_insert.time;
       if (end_min <= start_max) break;
       if (helper_->IsPresent(task_index)) {
         task_is_added_[task_index] = true;
@@ -413,7 +438,7 @@ bool CombinedDisjunctive<time_direction>::Propagate() {
     // TODO(user): Maybe factor out the code? It does require a function with a
     // lot of arguments though.
     helper_->ClearReason();
-    const std::vector<TaskSet::Entry>& sorted_tasks =
+    const absl::Span<const TaskSet::Entry> sorted_tasks =
         task_sets_[best_d_index].SortedTasks();
     const IntegerValue window_start =
         sorted_tasks[best_critical_index].start_min;
@@ -451,9 +476,14 @@ bool CombinedDisjunctive<time_direction>::Propagate() {
 }
 
 bool DisjunctiveOverloadChecker::Propagate() {
+  stats_.OnPropagate();
   if (!helper_->SynchronizeAndSetTimeDirection(/*is_forward=*/true)) {
+    ++stats_.num_conflicts;
     return false;
   }
+
+  // We use this to detect precedence between task that must cause a push.
+  TaskTime task_with_max_end_min = {0, kMinIntegerValue};
 
   // Split problem into independent part.
   //
@@ -470,18 +500,65 @@ bool DisjunctiveOverloadChecker::Propagate() {
   IntegerValue relevant_end;
   int window_size = 0;
   int relevant_size = 0;
-  for (const TaskTime task_time : helper_->TaskByIncreasingShiftedStartMin()) {
-    const int task = task_time.task_index;
-    if (helper_->IsAbsent(task)) continue;
+  TaskTime* const window = window_.get();
+  for (const auto [task, presence_lit, start_min] :
+       helper_->TaskByIncreasingShiftedStartMin()) {
+    if (helper_->IsAbsent(presence_lit)) continue;
+
+    // Nothing to do with overload checking, but almost free to do that here.
+    const IntegerValue size_min = helper_->SizeMin(task);
+    const IntegerValue end_min = start_min + size_min;
+    const IntegerValue start_max = helper_->StartMax(task);
+    if (start_max < task_with_max_end_min.time &&
+        helper_->IsPresent(presence_lit) && size_min > 0) {
+      // We have a detectable precedence that must cause a push.
+      //
+      // Remarks: If we added all precedence literals + linear relation, this
+      // propagation would have been done by the linear propagator, but if we
+      // didn't add such relations yet, it is beneficial to detect that here!
+      //
+      // TODO(user): Actually, we just infered a "not last" so we could check
+      // for relevant_size > 2 potential propagation?
+      //
+      // TODO(user): Can we detect and propagate all such relations easily and
+      // do a pass before this maybe? On a related note, because this
+      // propagator is not instantiated in both direction, we might miss some
+      // easy propag.
+      const int to_push = task_with_max_end_min.task_index;
+      helper_->ClearReason();
+      helper_->AddPresenceReason(task);
+      helper_->AddReasonForBeingBefore(task, to_push);
+      helper_->AddEndMinReason(task, end_min);
+
+      if (!helper_->IncreaseStartMin(to_push, end_min)) {
+        ++stats_.num_conflicts;
+        return false;
+      }
+
+      // TODO(user): Shall we keep propagating? we know the prefix didn't
+      // change, so we could be faster here. On another hand, it might be
+      // better to propagate all the linear constraints before returning
+      // here.
+      ++stats_.num_propagations;
+
+      stats_.EndWithoutConflicts();
+      return true;
+    }
+
+    // Note that we need to do that AFTER the block above.
+    if (end_min > task_with_max_end_min.time) {
+      task_with_max_end_min = {task, end_min};
+    }
 
     // Extend window.
-    const IntegerValue start_min = task_time.time;
     if (start_min < window_end) {
-      window_[window_size++] = task_time;
-      window_end += helper_->SizeMin(task);
-      if (window_end > helper_->EndMax(task)) {
+      window[window_size++] = {task, start_min};
+      if (window_end > start_max) {
+        window_end += size_min;
         relevant_size = window_size;
         relevant_end = window_end;
+      } else {
+        window_end += size_min;
       }
       continue;
     }
@@ -490,21 +567,24 @@ bool DisjunctiveOverloadChecker::Propagate() {
     // We don't need to process the end of the window (after relevant_size)
     // because these interval can be greedily assembled in a feasible solution.
     if (relevant_size > 0 && !PropagateSubwindow(relevant_size, relevant_end)) {
+      ++stats_.num_conflicts;
       return false;
     }
 
     // Start of the next window.
     window_size = 0;
-    window_[window_size++] = task_time;
-    window_end = start_min + helper_->SizeMin(task);
+    window[window_size++] = {task, start_min};
+    window_end = start_min + size_min;
     relevant_size = 0;
   }
 
   // Process last window.
   if (relevant_size > 0 && !PropagateSubwindow(relevant_size, relevant_end)) {
+    ++stats_.num_conflicts;
     return false;
   }
 
+  stats_.EndWithoutConflicts();
   return true;
 }
 
@@ -524,7 +604,10 @@ bool DisjunctiveOverloadChecker::PropagateSubwindow(
     // No point adding a task if its end_max is too large.
     const TaskTime& task_time = window_[i];
     const int task = task_time.task_index;
-    const IntegerValue end_max = helper_->EndMax(task);
+
+    // We use the shifted end-max.
+    const IntegerValue end_max =
+        helper_->StartMax(task) + helper_->SizeMin(task);
     if (end_max < global_window_end) {
       window_[num_events] = task_time;
       task_to_event_[task] = num_events;
@@ -532,6 +615,7 @@ bool DisjunctiveOverloadChecker::PropagateSubwindow(
       ++num_events;
     }
   }
+  if (num_events <= 1) return true;
   theta_tree_.Reset(num_events);
 
   // Introduce events by increasing end_max, check for overloads.
@@ -577,7 +661,7 @@ bool DisjunctiveOverloadChecker::PropagateSubwindow(
           const int task = window_[event].task_index;
           helper_->AddPresenceReason(task);
           helper_->AddEnergyAfterReason(task, energy_min, window_start);
-          helper_->AddEndMaxReason(task, window_end);
+          helper_->AddShiftedEndMaxReason(task, window_end);
         }
       }
       return helper_->ReportConflict();
@@ -610,14 +694,15 @@ bool DisjunctiveOverloadChecker::PropagateSubwindow(
             const int task = window_[event].task_index;
             helper_->AddPresenceReason(task);
             helper_->AddEnergyAfterReason(task, energy_min, window_start);
-            helper_->AddEndMaxReason(task, window_end);
+            helper_->AddShiftedEndMaxReason(task, window_end);
           }
         }
 
         helper_->AddEnergyAfterReason(optional_task, optional_size_min,
                                       window_start);
-        helper_->AddEndMaxReason(optional_task, window_end);
+        helper_->AddShiftedEndMaxReason(optional_task, window_end);
 
+        ++stats_.num_propagations;
         if (!helper_->PushTaskAbsence(optional_task)) return false;
       }
 
@@ -632,84 +717,286 @@ int DisjunctiveOverloadChecker::RegisterWith(GenericLiteralWatcher* watcher) {
   // This propagator reach the fix point in one pass.
   const int id = watcher->Register(this);
   helper_->SetTimeDirection(/*is_forward=*/true);
-  helper_->WatchAllTasks(id, watcher, /*watch_start_max=*/false,
-                         /*watch_end_max=*/true);
+  watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
+  helper_->WatchAllTasks(id);
   return id;
 }
 
-bool DisjunctiveDetectablePrecedences::Propagate() {
-  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) return false;
+int DisjunctiveSimplePrecedences::RegisterWith(GenericLiteralWatcher* watcher) {
+  const int id = watcher->Register(this);
+  helper_->WatchAllTasks(id);
+  watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
+  return id;
+}
 
-  to_propagate_.clear();
-  processed_.assign(helper_->NumTasks(), false);
+bool DisjunctiveSimplePrecedences::Propagate() {
+  stats_.OnPropagate();
 
-  // Split problem into independent part.
-  //
-  // The "independent" window can be processed separately because for each of
-  // them, a task [start-min, end-min] is in the window [window_start,
-  // window_end]. So any task to the left of the window cannot push such
-  // task start_min, and any task to the right of the window will have a
-  // start_max >= end_min, so wouldn't be in detectable precedence.
-  task_by_increasing_end_min_.clear();
-  IntegerValue window_end = kMinIntegerValue;
-  for (const TaskTime task_time : helper_->TaskByIncreasingStartMin()) {
-    const int task = task_time.task_index;
-    if (helper_->IsAbsent(task)) continue;
+  const bool current_direction = helper_->CurrentTimeIsForward();
+  for (const bool direction : {current_direction, !current_direction}) {
+    if (!helper_->SynchronizeAndSetTimeDirection(direction)) {
+      ++stats_.num_conflicts;
+      return false;
+    }
+    if (!PropagateOneDirection()) {
+      ++stats_.num_conflicts;
+      return false;
+    }
+  }
 
-    // Note that the helper returns value assuming the task is present.
-    const IntegerValue start_min = helper_->StartMin(task);
-    const IntegerValue size_min = helper_->SizeMin(task);
-    const IntegerValue end_min = helper_->EndMin(task);
-    DCHECK_GE(end_min, start_min + size_min);
+  stats_.EndWithoutConflicts();
+  return true;
+}
 
-    if (start_min < window_end) {
-      task_by_increasing_end_min_.push_back({task, end_min});
-      window_end = std::max(window_end, start_min) + size_min;
+bool DisjunctiveSimplePrecedences::Push(TaskTime before, int t) {
+  const int t_before = before.task_index;
+  DCHECK_NE(t_before, t);
+  helper_->ClearReason();
+  helper_->AddPresenceReason(t_before);
+  helper_->AddReasonForBeingBefore(t_before, t);
+  helper_->AddEndMinReason(t_before, before.time);
+  if (!helper_->IncreaseStartMin(t, before.time)) {
+    return false;
+  }
+  ++stats_.num_propagations;
+  return true;
+}
+
+bool DisjunctiveSimplePrecedences::PropagateOneDirection() {
+  // We will loop in a decreasing way here.
+  // And add tasks that are present to the task_set_.
+  absl::Span<const TaskTime> task_by_negated_start_max =
+      helper_->TaskByIncreasingNegatedStartMax();
+
+  // We just keep amongst all the task before current_end_min, the one with the
+  // highesh end-min.
+  TaskTime best_task_before = {-1, kMinIntegerValue};
+
+  // We will loop in an increasing way here and consume task from beginning.
+  absl::Span<const TaskTime> task_by_increasing_end_min =
+      helper_->TaskByIncreasingEndMin();
+
+  for (; !task_by_increasing_end_min.empty();) {
+    // Skip absent task.
+    if (helper_->IsAbsent(task_by_increasing_end_min.front().task_index)) {
+      task_by_increasing_end_min.remove_prefix(1);
       continue;
     }
 
-    // Process current window.
-    if (task_by_increasing_end_min_.size() > 1 && !PropagateSubwindow()) {
-      return false;
+    // Consider all task with a start_max < current_end_min.
+    int blocking_task = -1;
+    IntegerValue blocking_start_max;
+    IntegerValue current_end_min = task_by_increasing_end_min.front().time;
+    for (; true; task_by_negated_start_max.remove_suffix(1)) {
+      if (task_by_negated_start_max.empty()) {
+        // Small optim: this allows to process all remaining task rather than
+        // looping around are retesting this for all remaining tasks.
+        current_end_min = kMaxIntegerValue;
+        break;
+      }
+
+      const auto [t, negated_start_max] = task_by_negated_start_max.back();
+      const IntegerValue start_max = -negated_start_max;
+      if (current_end_min <= start_max) break;
+      if (!helper_->IsPresent(t)) continue;
+
+      // If t has a mandatory part, and extend further than current_end_min
+      // then we can push it first. All tasks for which their push is delayed
+      // are necessarily after this "blocking task".
+      //
+      // This idea is introduced in "Linear-Time Filtering Algorithms for the
+      // Disjunctive Constraints" Hamed Fahimi, Claude-Guy Quimper.
+      const IntegerValue end_min = helper_->EndMin(t);
+      if (blocking_task == -1 && end_min >= current_end_min) {
+        DCHECK_LT(start_max, end_min) << " task should have mandatory part: "
+                                      << helper_->TaskDebugString(t);
+        blocking_task = t;
+        blocking_start_max = start_max;
+        current_end_min = end_min;
+      } else if (blocking_task != -1 && blocking_start_max < end_min) {
+        // Conflict! the task is after the blocking_task but also before.
+        helper_->ClearReason();
+        helper_->AddPresenceReason(blocking_task);
+        helper_->AddPresenceReason(t);
+        helper_->AddReasonForBeingBefore(blocking_task, t);
+        helper_->AddReasonForBeingBefore(t, blocking_task);
+        return helper_->ReportConflict();
+      } else if (end_min > best_task_before.time) {
+        best_task_before = {t, end_min};
+      }
     }
 
-    // Start of the next window.
-    task_by_increasing_end_min_.clear();
-    task_by_increasing_end_min_.push_back({task, end_min});
-    window_end = end_min;
+    // If we have a blocking task. We need to propagate it first.
+    if (blocking_task != -1) {
+      DCHECK(!helper_->IsAbsent(blocking_task));
+      if (best_task_before.time > helper_->StartMin(blocking_task)) {
+        if (!Push(best_task_before, blocking_task)) return false;
+      }
+
+      // Update best_task_before.
+      //
+      // Note that we want the blocking task here as it is the only one
+      // guaranteed to be before all the task we push below. If we are not in a
+      // propagation loop, it should also be the best.
+      const IntegerValue end_min = helper_->EndMin(blocking_task);
+      best_task_before = {blocking_task, end_min};
+    }
+
+    // Lets propagate all task after best_task_before.
+    for (; !task_by_increasing_end_min.empty();
+         task_by_increasing_end_min.remove_prefix(1)) {
+      const auto [t, end_min] = task_by_increasing_end_min.front();
+      if (end_min > current_end_min) break;
+      if (t == blocking_task) continue;  // Already done.
+
+      // Lets propagate current_task.
+      if (best_task_before.time > helper_->StartMin(t)) {
+        // Corner case if a previous push caused a subsequent task to be absent.
+        if (helper_->IsAbsent(t)) continue;
+        if (!Push(best_task_before, t)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool DisjunctiveDetectablePrecedences::Propagate() {
+  stats_.OnPropagate();
+  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) {
+    ++stats_.num_conflicts;
+    return false;
   }
 
-  if (task_by_increasing_end_min_.size() > 1 && !PropagateSubwindow()) {
+  // Compute the "rank" of each task.
+  const auto by_shifted_smin = helper_->TaskByIncreasingShiftedStartMin();
+  int rank = -1;
+  IntegerValue window_end = kMinIntegerValue;
+  int* const ranks = ranks_.data();
+  for (const auto [task, presence_lit, start_min] : by_shifted_smin) {
+    if (!helper_->IsPresent(presence_lit)) {
+      ranks[task] = -1;
+      continue;
+    }
+
+    const IntegerValue size_min = helper_->SizeMin(task);
+    if (start_min < window_end) {
+      ranks[task] = rank;
+      window_end += size_min;
+    } else {
+      ranks[task] = ++rank;
+      window_end = start_min + size_min;
+    }
+  }
+
+  if (!PropagateWithRanks()) {
+    ++stats_.num_conflicts;
+    return false;
+  }
+  stats_.EndWithoutConflicts();
+  return true;
+}
+
+// task_set_ contains all the tasks that must be executed before t. They
+// are in "detectable precedence" because their start_max is smaller than
+// the end-min of t like so:
+//          [(the task t)
+//                     (a task in task_set_)]
+// From there, we deduce that the start-min of t is greater or equal to
+// the end-min of the critical tasks.
+//
+// Note that this works as well when IsPresent(t) is false.
+bool DisjunctiveDetectablePrecedences::Push(IntegerValue task_set_end_min,
+                                            int t) {
+  const int critical_index = task_set_.GetCriticalIndex();
+  const absl::Span<const TaskSet::Entry> sorted_tasks = task_set_.SortedTasks();
+  helper_->ClearReason();
+
+  // We need:
+  // - StartMax(ct) < EndMin(t) for the detectable precedence.
+  // - StartMin(ct) >= window_start for the value of task_set_end_min.
+  const IntegerValue end_min_if_present =
+      helper_->ShiftedStartMin(t) + helper_->SizeMin(t);
+  const IntegerValue window_start = sorted_tasks[critical_index].start_min;
+  IntegerValue min_slack = kMaxIntegerValue;
+  bool all_already_before = true;
+  IntegerValue energy_of_task_before = 0;
+  for (int i = critical_index; i < sorted_tasks.size(); ++i) {
+    const int ct = sorted_tasks[i].task;
+    DCHECK_NE(ct, t);
+    helper_->AddPresenceReason(ct);
+
+    // Heuristic, if some tasks are known to be after the first one,
+    // we just add the min-size as a reason.
+    if (i > critical_index && helper_->GetCurrentMinDistanceBetweenTasks(
+                                  sorted_tasks[critical_index].task, ct,
+                                  /*add_reason_if_after=*/true) >= 0) {
+      helper_->AddSizeMinReason(ct);
+    } else {
+      helper_->AddEnergyAfterReason(ct, sorted_tasks[i].size_min, window_start);
+    }
+
+    // We only need the reason for being before if we don't already have
+    // a static precedence between the tasks.
+    const IntegerValue dist = helper_->GetCurrentMinDistanceBetweenTasks(
+        ct, t, /*add_reason_if_after=*/true);
+    if (dist >= 0) {
+      energy_of_task_before += sorted_tasks[i].size_min;
+      min_slack = std::min(min_slack, dist);
+    } else {
+      all_already_before = false;
+      helper_->AddStartMaxReason(ct, end_min_if_present - 1);
+    }
+  }
+
+  // We only need the end-min of t if not all the task are already known
+  // to be before.
+  IntegerValue new_start_min = task_set_end_min;
+  if (all_already_before) {
+    // We can actually push further!
+    // And we don't need other reason except the precedences.
+    new_start_min += min_slack;
+  } else {
+    helper_->AddEndMinReason(t, end_min_if_present);
+  }
+
+  // In some situation, we can push the task further.
+  // TODO(user): We can also reduce the reason in this case.
+  if (min_slack != kMaxIntegerValue &&
+      window_start + energy_of_task_before + min_slack > new_start_min) {
+    new_start_min = window_start + energy_of_task_before + min_slack;
+  }
+
+  // Process detected precedence.
+  if (helper_->CurrentDecisionLevel() == 0 && helper_->IsPresent(t)) {
+    for (int i = critical_index; i < sorted_tasks.size(); ++i) {
+      if (!helper_->PropagatePrecedence(sorted_tasks[i].task, t)) {
+        return false;
+      }
+    }
+  }
+
+  // This augment the start-min of t. Note that t is not in task set
+  // yet, so we will use this updated start if we ever add it there.
+  ++stats_.num_propagations;
+  if (!helper_->IncreaseStartMin(t, new_start_min)) {
     return false;
   }
 
   return true;
 }
 
-bool DisjunctiveDetectablePrecedences::PropagateSubwindow() {
-  DCHECK(!task_by_increasing_end_min_.empty());
+bool DisjunctiveDetectablePrecedences::PropagateWithRanks() {
+  // We will "consume" tasks from here.
+  absl::Span<const TaskTime> task_by_increasing_end_min =
+      helper_->TaskByIncreasingEndMin();
+  absl::Span<const TaskTime> task_by_negated_start_max =
+      helper_->TaskByIncreasingNegatedStartMax();
 
-  // The vector is already sorted by shifted_start_min, so there is likely a
-  // good correlation, hence the incremental sort.
-  IncrementalSort(task_by_increasing_end_min_.begin(),
-                  task_by_increasing_end_min_.end());
-  const IntegerValue max_end_min = task_by_increasing_end_min_.back().time;
-
-  // Fill and sort task_by_increasing_start_max_.
-  //
-  // TODO(user): we should use start max if present, but more generally, all
-  // helper function should probably return values "if present".
-  task_by_increasing_start_max_.clear();
-  for (const TaskTime entry : task_by_increasing_end_min_) {
-    const int task = entry.task_index;
-    const IntegerValue start_max = helper_->StartMax(task);
-    if (start_max < max_end_min && helper_->IsPresent(task)) {
-      task_by_increasing_start_max_.push_back({task, start_max});
-    }
-  }
-  if (task_by_increasing_start_max_.empty()) return true;
-  std::sort(task_by_increasing_start_max_.begin(),
-            task_by_increasing_start_max_.end());
+  // We will stop using ranks as soon as we propagated something. This allow to
+  // be sure this propagate as much as possible in a single pass and seems to
+  // help slightly.
+  int highest_rank = 0;
+  bool some_propagation = false;
 
   // Invariant: need_update is false implies that task_set_end_min is equal to
   // task_set_.ComputeEndMin().
@@ -717,185 +1004,123 @@ bool DisjunctiveDetectablePrecedences::PropagateSubwindow() {
   // TODO(user): Maybe it is just faster to merge ComputeEndMin() with
   // AddEntry().
   task_set_.Clear();
-  to_propagate_.clear();
-  bool need_update = false;
+  to_add_.clear();
   IntegerValue task_set_end_min = kMinIntegerValue;
+  for (; !task_by_increasing_end_min.empty();) {
+    // Consider all task with a start_max < current_end_min.
+    int blocking_task = -1;
+    IntegerValue blocking_start_max;
+    IntegerValue current_end_min = task_by_increasing_end_min.front().time;
 
-  int queue_index = 0;
-  int blocking_task = -1;
-  const int queue_size = task_by_increasing_start_max_.size();
-  for (const auto task_time : task_by_increasing_end_min_) {
-    // Note that we didn't put absent task in task_by_increasing_end_min_, but
-    // the absence might have been pushed while looping here. This is fine since
-    // any push we do on this task should handle this case correctly.
-    const int current_task = task_time.task_index;
-    const IntegerValue current_end_min = task_time.time;
-    if (helper_->IsAbsent(current_task)) continue;
+    for (; true; task_by_negated_start_max.remove_suffix(1)) {
+      if (task_by_negated_start_max.empty()) {
+        // Small optim: this allows to process all remaining task rather than
+        // looping around are retesting this for all remaining tasks.
+        current_end_min = kMaxIntegerValue;
+        break;
+      }
 
-    for (; queue_index < queue_size; ++queue_index) {
-      const auto to_insert = task_by_increasing_start_max_[queue_index];
-      const IntegerValue start_max = to_insert.time;
+      const auto [t, negated_start_max] = task_by_negated_start_max.back();
+      const IntegerValue start_max = -negated_start_max;
       if (current_end_min <= start_max) break;
 
-      const int t = to_insert.task_index;
+      // If the task is not present, its rank will be -1.
+      const int rank = ranks_[t];
+      if (rank < highest_rank) continue;
       DCHECK(helper_->IsPresent(t));
 
-      // If t has not been processed yet, it has a mandatory part, and rather
-      // than adding it right away to task_set, we will delay all propagation
-      // until current_task is equal to this "blocking task".
+      // If t has a mandatory part, and extend further than current_end_min
+      // then we can push it first. All tasks for which their push is delayed
+      // are necessarily after this "blocking task".
       //
       // This idea is introduced in "Linear-Time Filtering Algorithms for the
       // Disjunctive Constraints" Hamed Fahimi, Claude-Guy Quimper.
-      //
-      // Experiments seems to indicate that it is slighlty faster rather than
-      // having to ignore one of the task already inserted into task_set_ when
-      // we have tasks with mandatory parts. It also open-up more option for the
-      // data structure used in task_set_.
-      if (!processed_[t]) {
-        if (blocking_task != -1) {
-          // We have two blocking tasks, which means they are in conflict.
-          helper_->ClearReason();
-          helper_->AddPresenceReason(blocking_task);
-          helper_->AddPresenceReason(t);
-          helper_->AddReasonForBeingBefore(blocking_task, t);
-          helper_->AddReasonForBeingBefore(t, blocking_task);
-          return helper_->ReportConflict();
-        }
-        DCHECK_LT(start_max, helper_->ShiftedStartMin(t) + helper_->SizeMin(t))
-            << " task should have mandatory part: "
-            << helper_->TaskDebugString(t);
-        DCHECK(to_propagate_.empty());
+      const IntegerValue end_min = helper_->EndMin(t);
+      if (blocking_task == -1 && end_min >= current_end_min) {
+        DCHECK_LT(start_max, end_min) << " task should have mandatory part: "
+                                      << helper_->TaskDebugString(t);
         blocking_task = t;
-        to_propagate_.push_back(t);
+        blocking_start_max = start_max;
+        current_end_min = end_min;
+      } else if (blocking_task != -1 && blocking_start_max < end_min) {
+        // Conflict! the task is after the blocking_task but also before.
+        helper_->ClearReason();
+        helper_->AddPresenceReason(blocking_task);
+        helper_->AddPresenceReason(t);
+        helper_->AddReasonForBeingBefore(blocking_task, t);
+        helper_->AddReasonForBeingBefore(t, blocking_task);
+        return helper_->ReportConflict();
       } else {
-        need_update = true;
-        task_set_.AddShiftedStartMinEntry(*helper_, t);
+        if (!some_propagation && rank > highest_rank) {
+          to_add_.clear();
+          task_set_.Clear();
+          highest_rank = rank;
+        }
+        to_add_.push_back(t);
       }
     }
 
-    // If we have a blocking task, we delay the propagation until current_task
-    // is the blocking task.
-    if (blocking_task != current_task) {
-      to_propagate_.push_back(current_task);
-      if (blocking_task != -1) continue;
-    }
-    for (const int t : to_propagate_) {
-      DCHECK(!processed_[t]);
-      processed_[t] = true;
-      if (need_update) {
-        need_update = false;
+    // If we have a blocking task. We need to propagate it first.
+    if (blocking_task != -1) {
+      DCHECK(!helper_->IsAbsent(blocking_task));
+
+      if (!to_add_.empty()) {
+        for (const int t : to_add_) {
+          task_set_.AddShiftedStartMinEntry(*helper_, t);
+        }
+        to_add_.clear();
         task_set_end_min = task_set_.ComputeEndMin();
       }
 
-      // Corner case if a previous push from to_propagate_ caused a subsequent
-      // task to be absent.
-      if (helper_->IsAbsent(t)) continue;
-
-      // task_set_ contains all the tasks that must be executed before t. They
-      // are in "detectable precedence" because their start_max is smaller than
-      // the end-min of t like so:
-      //          [(the task t)
-      //                     (a task in task_set_)]
-      // From there, we deduce that the start-min of t is greater or equal to
-      // the end-min of the critical tasks.
-      //
-      // Note that this works as well when IsPresent(t) is false.
-      if (task_set_end_min > helper_->StartMin(t)) {
-        const int critical_index = task_set_.GetCriticalIndex();
-        const std::vector<TaskSet::Entry>& sorted_tasks =
-            task_set_.SortedTasks();
-        helper_->ClearReason();
-
-        // We need:
-        // - StartMax(ct) < EndMin(t) for the detectable precedence.
-        // - StartMin(ct) >= window_start for the value of task_set_end_min.
-        const IntegerValue end_min_if_present =
-            helper_->ShiftedStartMin(t) + helper_->SizeMin(t);
-        const IntegerValue window_start =
-            sorted_tasks[critical_index].start_min;
-        IntegerValue min_slack = kMaxIntegerValue;
-        bool all_already_before = true;
-        IntegerValue energy_of_task_before = 0;
-        for (int i = critical_index; i < sorted_tasks.size(); ++i) {
-          const int ct = sorted_tasks[i].task;
-          DCHECK_NE(ct, t);
-          helper_->AddPresenceReason(ct);
-
-          // Heuristic, if some tasks are known to be after the first one,
-          // we just add the min-size as a reason.
-          if (i > critical_index && helper_->GetCurrentMinDistanceBetweenTasks(
-                                        sorted_tasks[critical_index].task, ct,
-                                        /*add_reason_if_after=*/true) >= 0) {
-            helper_->AddSizeMinReason(ct);
-          } else {
-            helper_->AddEnergyAfterReason(ct, sorted_tasks[i].size_min,
-                                          window_start);
-          }
-
-          // We only need the reason for being before if we don't already have
-          // a static precedence between the tasks.
-          const IntegerValue dist = helper_->GetCurrentMinDistanceBetweenTasks(
-              ct, t, /*add_reason_if_after=*/true);
-          if (dist >= 0) {
-            energy_of_task_before += sorted_tasks[i].size_min;
-            min_slack = std::min(min_slack, dist);
-          } else {
-            all_already_before = false;
-            helper_->AddStartMaxReason(ct, end_min_if_present - 1);
-          }
-        }
-
-        // We only need the end-min of t if not all the task are already known
-        // to be before.
-        IntegerValue new_start_min = task_set_end_min;
-        if (all_already_before) {
-          // We can actually push further!
-          // And we don't need other reason except the precedences.
-          new_start_min += min_slack;
-        } else {
-          helper_->AddEndMinReason(t, end_min_if_present);
-        }
-
-        // In some situation, we can push the task further.
-        // TODO(user): We can also reduce the reason in this case.
-        if (min_slack != kMaxIntegerValue &&
-            window_start + energy_of_task_before + min_slack > new_start_min) {
-          new_start_min = window_start + energy_of_task_before + min_slack;
-        }
-
-        // Process detected precedence.
-        if (helper_->CurrentDecisionLevel() == 0 && helper_->IsPresent(t)) {
-          for (int i = critical_index; i < sorted_tasks.size(); ++i) {
-            if (!helper_->PropagatePrecedence(sorted_tasks[i].task, t)) {
-              return false;
-            }
-          }
-        }
-
-        // This augment the start-min of t. Note that t is not in task set
-        // yet, so we will use this updated start if we ever add it there.
-        if (!helper_->IncreaseStartMin(t, new_start_min)) {
-          return false;
-        }
-
-        // This propagators assumes that every push is reflected for its
-        // correctness.
-        if (helper_->InPropagationLoop()) return true;
+      if (task_set_end_min > helper_->StartMin(blocking_task)) {
+        some_propagation = true;
+        if (!Push(task_set_end_min, blocking_task)) return false;
       }
 
-      if (t == blocking_task) {
-        // Insert the blocking_task. Note that because we just pushed it,
-        // it will be last in task_set_ and also the only reason used to push
-        // any of the subsequent tasks. In particular, the reason will be valid
-        // even though task_set might contains tasks with a start_max greater or
-        // equal to the end_min of the task we push.
-        need_update = true;
-        blocking_task = -1;
-        task_set_.AddShiftedStartMinEntry(*helper_, t);
+      // This propagators assumes that every push is reflected for its
+      // correctness.
+      if (helper_->InPropagationLoop()) return true;
+
+      // Insert the blocking_task. Note that because we just pushed it,
+      // it will be last in task_set_ and also the only reason used to push
+      // any of the subsequent tasks below. In particular, the reason will be
+      // valid even though task_set might contains tasks with a start_max
+      // greater or equal to the end_min of the task we push.
+      if (!some_propagation && ranks_[blocking_task] > highest_rank) {
+        to_add_.clear();
+        task_set_.Clear();
+        highest_rank = ranks_[blocking_task];
+      }
+      to_add_.push_back(blocking_task);
+    }
+
+    // Lets propagate all task with end_min <= current_end_min that are also
+    // after all the task in task_set_.
+    for (; !task_by_increasing_end_min.empty();
+         task_by_increasing_end_min.remove_prefix(1)) {
+      const auto [t, end_min] = task_by_increasing_end_min.front();
+      if (end_min > current_end_min) break;
+      if (t == blocking_task) continue;  // Already done.
+
+      if (!to_add_.empty()) {
+        for (const int t : to_add_) {
+          task_set_.AddShiftedStartMinEntry(*helper_, t);
+        }
+        to_add_.clear();
+        task_set_end_min = task_set_.ComputeEndMin();
+      }
+
+      // Lets propagate current_task.
+      if (task_set_end_min > helper_->StartMin(t)) {
+        // Corner case if a previous push caused a subsequent task to be absent.
+        if (helper_->IsAbsent(t)) continue;
+
+        some_propagation = true;
+        if (!Push(task_set_end_min, t)) return false;
       }
     }
-    to_propagate_.clear();
   }
+
   return true;
 }
 
@@ -903,50 +1128,48 @@ int DisjunctiveDetectablePrecedences::RegisterWith(
     GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
   helper_->SetTimeDirection(time_direction_);
-  helper_->WatchAllTasks(id, watcher, /*watch_start_max=*/true,
-                         /*watch_end_max=*/false);
+  helper_->WatchAllTasks(id);
   watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
   return id;
 }
 
-DisjunctivePrecedences::~DisjunctivePrecedences() {
-  if (!VLOG_IS_ON(1)) return;
-  if (shared_stats_ == nullptr) return;
-  std::vector<std::pair<std::string, int64_t>> stats;
-  stats.push_back({"disj_precedences/num_propagations_", num_propagations_});
-  shared_stats_->AddStats(stats);
-}
-
 bool DisjunctivePrecedences::Propagate() {
-  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) return false;
+  stats_.OnPropagate();
+  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) {
+    ++stats_.num_conflicts;
+    return false;
+  }
   window_.clear();
 
   // We only need to consider "critical" set of tasks given how we compute the
   // min-offset in PropagateSubwindow().
   IntegerValue window_end = kMinIntegerValue;
-  for (const TaskTime task_time : helper_->TaskByIncreasingShiftedStartMin()) {
-    const int task = task_time.task_index;
-    if (!helper_->IsPresent(task)) continue;
+  for (const auto [task, presence_lit, start_min] :
+       helper_->TaskByIncreasingShiftedStartMin()) {
+    if (!helper_->IsPresent(presence_lit)) continue;
 
-    const IntegerValue start_min = task_time.time;
     if (start_min < window_end) {
-      window_.push_back(task_time);
+      window_.push_back({task, start_min});
       window_end += helper_->SizeMin(task);
       continue;
     }
 
     if (window_.size() > 1 && !PropagateSubwindow()) {
+      ++stats_.num_conflicts;
       return false;
     }
 
     // Start of the next window.
     window_.clear();
-    window_.push_back(task_time);
+    window_.push_back({task, start_min});
     window_end = start_min + helper_->SizeMin(task);
   }
   if (window_.size() > 1 && !PropagateSubwindow()) {
+    ++stats_.num_conflicts;
     return false;
   }
+
+  stats_.EndWithoutConflicts();
   return true;
 }
 
@@ -1095,7 +1318,7 @@ bool DisjunctivePrecedences::PropagateSubwindow() {
           helper_->MutableLiteralReason()->push_back(l.Negated());
         }
       }
-      ++num_propagations_;
+      ++stats_.num_propagations;
       if (!helper_->PushIntegerLiteral(
               IntegerLiteral::GreaterOrEqual(var, best_new_lb))) {
         return false;
@@ -1107,19 +1330,28 @@ bool DisjunctivePrecedences::PropagateSubwindow() {
 
 int DisjunctivePrecedences::RegisterWith(GenericLiteralWatcher* watcher) {
   // This propagator reach the fixed point in one go.
+  // Maybe not in corner cases, but since it is expansive, it is okay not to
+  // run it again right away
+  //
+  // Note also that technically, we don't need to be waked up if only the upper
+  // bound of the task changes, but this require to use more memory and the gain
+  // is unclear as this runs with the highest priority.
   const int id = watcher->Register(this);
   helper_->SetTimeDirection(time_direction_);
-  helper_->WatchAllTasks(id, watcher, /*watch_start_max=*/false,
-                         /*watch_end_max=*/false);
+  helper_->WatchAllTasks(id);
   return id;
 }
 
 bool DisjunctiveNotLast::Propagate() {
-  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) return false;
+  stats_.OnPropagate();
+  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) {
+    ++stats_.num_conflicts;
+    return false;
+  }
 
-  const auto& task_by_decreasing_start_max =
-      helper_->TaskByDecreasingStartMax();
-  const auto& task_by_increasing_shifted_start_min =
+  const auto task_by_negated_start_max =
+      helper_->TaskByIncreasingNegatedStartMax();
+  const auto task_by_increasing_shifted_start_min =
       helper_->TaskByIncreasingShiftedStartMin();
 
   // Split problem into independent part.
@@ -1133,22 +1365,21 @@ bool DisjunctiveNotLast::Propagate() {
   // looking at the task in the first window. Tasks to the left do not cause
   // issue for the task to be last, and tasks to the right will not lower the
   // end-min of the task under consideration.
-  int queue_index = task_by_decreasing_start_max.size() - 1;
+  int queue_index = task_by_negated_start_max.size() - 1;
   const int num_tasks = task_by_increasing_shifted_start_min.size();
   for (int i = 0; i < num_tasks;) {
     start_min_window_.clear();
     IntegerValue window_end = kMinIntegerValue;
     for (; i < num_tasks; ++i) {
-      const TaskTime task_time = task_by_increasing_shifted_start_min[i];
-      const int task = task_time.task_index;
-      if (!helper_->IsPresent(task)) continue;
+      const auto [task, presence_lit, start_min] =
+          task_by_increasing_shifted_start_min[i];
+      if (!helper_->IsPresent(presence_lit)) continue;
 
-      const IntegerValue start_min = task_time.time;
       if (start_min_window_.empty()) {
-        start_min_window_.push_back(task_time);
+        start_min_window_.push_back({task, start_min});
         window_end = start_min + helper_->SizeMin(task);
       } else if (start_min < window_end) {
-        start_min_window_.push_back(task_time);
+        start_min_window_.push_back({task, start_min});
         window_end += helper_->SizeMin(task);
       } else {
         break;
@@ -1159,12 +1390,14 @@ bool DisjunctiveNotLast::Propagate() {
     // fall into [window_start, window_end).
     start_max_window_.clear();
     for (; queue_index >= 0; queue_index--) {
-      const auto task_time = task_by_decreasing_start_max[queue_index];
+      const auto [t, negated_start_max] =
+          task_by_negated_start_max[queue_index];
+      const IntegerValue start_max = -negated_start_max;
 
       // Note that we add task whose presence is still unknown here.
-      if (task_time.time >= window_end) break;
-      if (helper_->IsAbsent(task_time.task_index)) continue;
-      start_max_window_.push_back(task_time);
+      if (start_max >= window_end) break;
+      if (helper_->IsAbsent(t)) continue;
+      start_max_window_.push_back({t, start_max});
     }
 
     // If this is the case, we cannot propagate more than the detectable
@@ -1174,9 +1407,12 @@ bool DisjunctiveNotLast::Propagate() {
 
     // Process current window.
     if (!start_max_window_.empty() && !PropagateSubwindow()) {
+      ++stats_.num_conflicts;
       return false;
     }
   }
+
+  stats_.EndWithoutConflicts();
   return true;
 }
 
@@ -1251,7 +1487,8 @@ bool DisjunctiveNotLast::PropagateSubwindow() {
     // Find the largest start-max of the critical tasks (excluding t). The
     // end-max for t need to be smaller than or equal to this.
     IntegerValue largest_ct_start_max = kMinIntegerValue;
-    const std::vector<TaskSet::Entry>& sorted_tasks = task_set_.SortedTasks();
+    const absl::Span<const TaskSet::Entry> sorted_tasks =
+        task_set_.SortedTasks();
     const int sorted_tasks_size = sorted_tasks.size();
     for (int i = critical_index; i < sorted_tasks_size; ++i) {
       const int ct = sorted_tasks[i].task;
@@ -1298,6 +1535,7 @@ bool DisjunctiveNotLast::PropagateSubwindow() {
 
       // Enqueue the new end-max for t.
       // Note that changing it will not influence the rest of the loop.
+      ++stats_.num_propagations;
       if (!helper_->DecreaseEndMax(t, largest_ct_start_max)) return false;
     }
   }
@@ -1306,27 +1544,31 @@ bool DisjunctiveNotLast::PropagateSubwindow() {
 
 int DisjunctiveNotLast::RegisterWith(GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
-  helper_->WatchAllTasks(id, watcher);
+  helper_->WatchAllTasks(id);
   watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
   return id;
 }
 
 bool DisjunctiveEdgeFinding::Propagate() {
+  stats_.OnPropagate();
   const int num_tasks = helper_->NumTasks();
-  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) return false;
+  if (!helper_->SynchronizeAndSetTimeDirection(time_direction_)) {
+    ++stats_.num_conflicts;
+    return false;
+  }
   is_gray_.resize(num_tasks, false);
   non_gray_task_to_event_.resize(num_tasks);
 
   window_.clear();
   IntegerValue window_end = kMinIntegerValue;
-  for (const TaskTime task_time : helper_->TaskByIncreasingShiftedStartMin()) {
-    const int task = task_time.task_index;
-    if (helper_->IsAbsent(task)) continue;
+  for (const auto [task, presence_lit, shifted_smin] :
+       helper_->TaskByIncreasingShiftedStartMin()) {
+    if (helper_->IsAbsent(presence_lit)) continue;
 
     // Note that we use the real start min here not the shifted one. This is
     // because we might be able to push it if it is smaller than window end.
     if (helper_->StartMin(task) < window_end) {
-      window_.push_back(task_time);
+      window_.push_back({task, shifted_smin});
       window_end += helper_->SizeMin(task);
       continue;
     }
@@ -1334,17 +1576,29 @@ bool DisjunctiveEdgeFinding::Propagate() {
     // We need at least 3 tasks for the edge-finding to be different from
     // detectable precedences.
     if (window_.size() > 2 && !PropagateSubwindow(window_end)) {
+      ++stats_.num_conflicts;
       return false;
+    }
+
+    // Corner case: The propagation of the previous window might have made the
+    // current task absent even if it wasn't at the loop beginning.
+    if (helper_->IsAbsent(presence_lit)) {
+      window_.clear();
+      window_end = kMinIntegerValue;
+      continue;
     }
 
     // Start of the next window.
     window_.clear();
-    window_.push_back(task_time);
-    window_end = task_time.time + helper_->SizeMin(task);
+    window_.push_back({task, shifted_smin});
+    window_end = shifted_smin + helper_->SizeMin(task);
   }
   if (window_.size() > 2 && !PropagateSubwindow(window_end)) {
+    ++stats_.num_conflicts;
     return false;
   }
+
+  stats_.EndWithoutConflicts();
   return true;
 }
 
@@ -1546,6 +1800,7 @@ bool DisjunctiveEdgeFinding::PropagateSubwindow(IntegerValue window_end_min) {
         // TODO(user): propagate the precedence Boolean here too? I think it
         // will be more powerful. Even if eventually all these precedence will
         // become detectable (see Petr Villim PhD).
+        ++stats_.num_propagations;
         if (!helper_->IncreaseStartMin(gray_task, non_gray_end_min)) {
           return false;
         }
@@ -1581,8 +1836,7 @@ bool DisjunctiveEdgeFinding::PropagateSubwindow(IntegerValue window_end_min) {
 int DisjunctiveEdgeFinding::RegisterWith(GenericLiteralWatcher* watcher) {
   const int id = watcher->Register(this);
   helper_->SetTimeDirection(time_direction_);
-  helper_->WatchAllTasks(id, watcher, /*watch_start_max=*/false,
-                         /*watch_end_max=*/true);
+  helper_->WatchAllTasks(id);
   watcher->NotifyThatPropagatorMayNotReachFixedPointInOnePass(id);
   return id;
 }

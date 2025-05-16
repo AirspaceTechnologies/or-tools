@@ -21,24 +21,24 @@ RUN wget -q --no-check-certificate "https://cmake.org/files/v3.26/cmake-3.26.4-l
 && ./cmake-3.26.4-linux-x86_64.sh --prefix=/usr --skip-license \
 && rm cmake-3.26.4-linux-x86_64.sh
 
-# Install Swig 4.1.1
+# Install Swig 4.3.1
 RUN curl --location-trusted \
- --remote-name "https://downloads.sourceforge.net/project/swig/swig/swig-4.1.1/swig-4.1.1.tar.gz" \
- -o swig-4.1.1.tar.gz \
-&& tar xvf swig-4.1.1.tar.gz \
-&& rm swig-4.1.1.tar.gz \
-&& cd swig-4.1.1 \
+ --remote-name "https://downloads.sourceforge.net/project/swig/swig/swig-4.3.1/swig-4.3.1.tar.gz" \
+ -o swig-4.3.1.tar.gz \
+&& tar xvf swig-4.3.1.tar.gz \
+&& rm swig-4.3.1.tar.gz \
+&& cd swig-4.3.1 \
 && ./configure --prefix=/usr \
 && make -j 4 \
 && make install \
 && cd .. \
-&& rm -rf swig-4.1.1
+&& rm -rf swig-4.3.1
 
-# Install Go 1.23.0
-RUN wget -q --no-check-certificate "https://go.dev/dl/go1.23.0.linux-amd64.tar.gz" \
+# Install Go 1.24.3
+RUN wget -q --no-check-certificate "https://go.dev/dl/go1.24.3.linux-amd64.tar.gz" \
 && rm -rf /usr/local/go \
-&& tar -C /usr/local -xzf go1.23.0.linux-amd64.tar.gz \
-&& rm go1.23.0.linux-amd64.tar.gz
+&& tar -C /usr/local -xzf go1.24.3.linux-amd64.tar.gz \
+&& rm go1.24.3.linux-amd64.tar.gz
 ENV PATH=$PATH:/usr/local/go/bin
 RUN GOBIN=/usr/local/go/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33
 RUN go version
@@ -62,9 +62,9 @@ WORKDIR /root
 # use ORTOOLS_GIT_SHA1 to modify the command
 # i.e. avoid docker reusing the cache when new commit is pushed
 ARG ORTOOLS_GIT_BRANCH
-ENV ORTOOLS_GIT_BRANCH ${ORTOOLS_GIT_BRANCH:-airspace}
+ENV ORTOOLS_GIT_BRANCH=${ORTOOLS_GIT_BRANCH:-airspace}
 ARG ORTOOLS_GIT_SHA1
-ENV ORTOOLS_GIT_SHA1 ${ORTOOLS_GIT_SHA1:-unknown}
+ENV ORTOOLS_GIT_SHA1=${ORTOOLS_GIT_SHA1:-unknown}
 # RUN git clone -b "${ORTOOLS_GIT_BRANCH}" --single-branch https://github.com/AirspaceTechnologies/or-tools \
 # && cd or-tools \
 # && git reset --hard "${ORTOOLS_GIT_SHA1}"

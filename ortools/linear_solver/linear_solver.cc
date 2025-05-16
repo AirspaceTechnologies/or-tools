@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -42,6 +42,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_replace.h"
+#include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
@@ -1001,7 +1002,7 @@ bool InCategory(int status, int category) {
   return status == category;
 }
 
-void AppendStatusStr(const std::string& msg, MPSolutionResponse* response) {
+void AppendStatusStr(absl::string_view msg, MPSolutionResponse* response) {
   response->set_status_str(
       absl::StrCat(response->status_str(),
                    (response->status_str().empty() ? "" : "\n"), msg));
@@ -1153,7 +1154,7 @@ void MPSolver::SolveLazyMutableRequest(LazyMutableCopy<MPModelRequest> request,
       // not arbitrary, as we want to maintain any custom thread options set by
       // the user. They shouldn't matter for polling, but for solving we might
       // e.g. use a larger stack.
-      ThreadPool thread_pool("SolverThread", /*num_threads=*/1);
+      ThreadPool thread_pool(/*num_threads=*/1);
       thread_pool.StartWorkers();
       thread_pool.Schedule(polling_func);
 

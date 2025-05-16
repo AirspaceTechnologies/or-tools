@@ -165,13 +165,14 @@ import com.google.ortools.sat.BoolVar;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.DecisionStrategyProto;
 import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.LinearExpr;
 import com.google.ortools.sat.SatParameters;
 
 /** Link integer constraints together. */
-public class ChannelingSampleSat {
+public final class ChannelingSampleSat {
   public static void main(String[] args) throws Exception {
     Loader.loadNativeLibraries();
     // Create the CP-SAT model.
@@ -207,7 +208,7 @@ public class ChannelingSampleSat {
     solver.getParameters().setEnumerateAllSolutions(true);
 
     // Solve the problem with the printer callback.
-    solver.solve(model, new CpSolverSolutionCallback() {
+    CpSolverStatus unusedStatus = solver.solve(model, new CpSolverSolutionCallback() {
       public CpSolverSolutionCallback init(IntVar[] variables) {
         variableArray = variables;
         return this;
@@ -224,6 +225,8 @@ public class ChannelingSampleSat {
       private IntVar[] variableArray;
     }.init(new IntVar[] {vars[0], vars[1], b}));
   }
+
+  private ChannelingSampleSat() {}
 }
 ```
 
@@ -305,11 +308,11 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	"golang/protobuf/v2/proto/proto"
-	cmpb "ortools/sat/cp_model_go_proto"
-	"ortools/sat/go/cpmodel"
-	sppb "ortools/sat/sat_parameters_go_proto"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	cmpb "github.com/google/or-tools/ortools/sat/proto/cpmodel"
+	sppb "github.com/google/or-tools/ortools/sat/proto/satparameters"
+	"google.golang.org/protobuf/proto"
 )
 
 func channelingSampleSat() error {
@@ -341,12 +344,12 @@ func channelingSampleSat() error {
 	if err != nil {
 		return fmt.Errorf("failed to instantiate the CP model: %w", err)
 	}
-	params := sppb.SatParameters_builder{
+	params := &sppb.SatParameters{
 		FillAdditionalSolutionsInResponse: proto.Bool(true),
 		EnumerateAllSolutions:             proto.Bool(true),
 		SolutionPoolSize:                  proto.Int32(11),
 		SearchBranching:                   sppb.SatParameters_FIXED_SEARCH.Enum(),
-	}.Build()
+	}
 	response, err := cpmodel.SolveCpModelWithParameters(m, params)
 	if err != nil {
 		return fmt.Errorf("failed to solve the model: %w", err)
@@ -364,7 +367,7 @@ func channelingSampleSat() error {
 
 func main() {
 	if err := channelingSampleSat(); err != nil {
-		glog.Exitf("channelingSampleSat returned with error: %v", err)
+		log.Exitf("channelingSampleSat returned with error: %v", err)
 	}
 }
 ```
@@ -892,8 +895,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	"ortools/sat/go/cpmodel"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
 )
 
 const (
@@ -904,7 +907,7 @@ const (
 )
 
 type item struct {
-	Cost, Copies int64_t
+	Cost, Copies int64
 }
 
 func binpackingProblemSat() error {
@@ -990,7 +993,7 @@ func binpackingProblemSat() error {
 
 func main() {
 	if err := binpackingProblemSat(); err != nil {
-		glog.Exitf("binpackingProblemSat returned with error: %v", err)
+		log.Exitf("binpackingProblemSat returned with error: %v", err)
 	}
 }
 ```

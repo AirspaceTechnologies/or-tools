@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -66,11 +66,11 @@ def jobshop_ft06() -> None:
     all_tasks = {}
     for i in all_jobs:
         for j in all_machines:
-            start_var = model.new_int_var(0, horizon, "start_%i_%i" % (i, j))
+            start_var = model.new_int_var(0, horizon, f"start_{i}_{j}")
             duration = durations[i][j]
-            end_var = model.new_int_var(0, horizon, "end_%i_%i" % (i, j))
+            end_var = model.new_int_var(0, horizon, f"end_{i}_{j}")
             interval_var = model.new_interval_var(
-                start_var, duration, end_var, "interval_%i_%i" % (i, j)
+                start_var, duration, end_var, f"interval_{i}_{j}"
             )
             all_tasks[(i, j)] = task_type(
                 start=start_var, end=end_var, interval=interval_var
@@ -113,7 +113,7 @@ def jobshop_ft06() -> None:
             ]
             visualization.DisplayJobshop(starts, durations, machines, "FT06")
         else:
-            print("Optimal makespan: %i" % solver.objective_value)
+            print(f"Optimal makespan: {solver.objective_value}")
 
 
 jobshop_ft06()

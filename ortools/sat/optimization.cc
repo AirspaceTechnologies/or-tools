@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,9 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <deque>
 #include <functional>
-#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,21 +26,18 @@
 #include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
-#include "absl/random/bit_gen_ref.h"
-#include "absl/random/random.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/macros.h"
 #include "ortools/base/stl_util.h"
 #include "ortools/base/strong_vector.h"
-#include "ortools/port/proto_utils.h"
-#include "ortools/sat/boolean_problem.h"
 #include "ortools/sat/boolean_problem.pb.h"
 #include "ortools/sat/clause.h"
 #include "ortools/sat/encoding.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/integer_expr.h"
 #include "ortools/sat/integer_search.h"
 #include "ortools/sat/model.h"
@@ -758,10 +753,11 @@ SatSolver::Status CoreBasedOptimizer::OptimizeWithSatEncoding(
       const int num_bools = sat_solver_->NumVariables();
       const int num_fixed = sat_solver_->NumFixedVariables();
       model_->GetOrCreate<SharedResponseManager>()->UpdateInnerObjectiveBounds(
-          absl::StrFormat(
-              "bool_core (num_cores=%d [%s] a=%u d=%d fixed=%d/%d clauses=%s)",
-              iter, previous_core_info, encoder.nodes().size(), max_depth,
-              num_fixed, num_bools, FormatCounter(clauses_->num_clauses())),
+          absl::StrFormat("bool_%s (num_cores=%d [%s] a=%u d=%d "
+                          "fixed=%d/%d clauses=%s)",
+                          model_->Name(), iter, previous_core_info,
+                          encoder.nodes().size(), max_depth, num_fixed,
+                          num_bools, FormatCounter(clauses_->num_clauses())),
           new_obj_lb, integer_trail_->LevelZeroUpperBound(objective_var_));
     }
 
@@ -903,8 +899,8 @@ void CoreBasedOptimizer::PresolveObjectiveWithAtMostOne(
   // This contains non-negative value. If a literal has negative weight, then
   // we just put a positive weight on its negation and update the offset.
   const int num_literals = implications_->literal_size();
-  absl::StrongVector<LiteralIndex, Coefficient> weights(num_literals);
-  absl::StrongVector<LiteralIndex, bool> is_candidate(num_literals);
+  util_intops::StrongVector<LiteralIndex, Coefficient> weights(num_literals);
+  util_intops::StrongVector<LiteralIndex, bool> is_candidate(num_literals);
 
   // For now, we do not use weight. Note that finding the at most on in the
   // creation order of the variable make a HUGE difference on the max-sat frb
@@ -913,7 +909,7 @@ void CoreBasedOptimizer::PresolveObjectiveWithAtMostOne(
   // TODO(user): We can assign preferences to literals to favor certain at most
   // one instead of other. For now we don't, so ExpandAtMostOneWithWeight() will
   // kind of randomize the expansion amongst possible choices.
-  absl::StrongVector<LiteralIndex, double> preferences;
+  util_intops::StrongVector<LiteralIndex, double> preferences;
 
   // Collect all literals with "negative weights", we will try to find at most
   // one between them.

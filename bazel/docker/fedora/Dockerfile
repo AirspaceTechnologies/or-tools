@@ -6,7 +6,7 @@ FROM fedora:latest AS env
 ENV PATH=/usr/local/bin:$PATH
 RUN dnf -y update \
 && dnf -y install git wget \
-&& dnf -y groupinstall "Development Tools" \
+&& dnf -y install @development-tools \
 && dnf -y install gcc-c++ zlib-devel \
 && dnf -y install dnf-plugins-core \
 && dnf -y install which \
@@ -14,7 +14,7 @@ RUN dnf -y update \
 
 # Install Bazelisk
 RUN wget \
-https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64 \
+https://github.com/bazelbuild/bazelisk/releases/download/v1.23.0/bazelisk-linux-amd64 \
 && chmod +x bazelisk-linux-amd64 \
 && mv bazelisk-linux-amd64 /usr/local/bin/bazel
 
@@ -26,7 +26,7 @@ ENV JAVA_HOME=/usr/lib/jvm/java-openjdk
 
 # Install Python
 RUN dnf -y update \
-&& dnf -y install python3 python3-devel python3-pip \
+&& dnf -y install python3 python3-devel python3-pip python3-numpy \
 && dnf clean all
 
 FROM env AS devel

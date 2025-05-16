@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,14 +17,12 @@
 #ifndef OR_TOOLS_MATH_OPT_CPP_SOLVER_INIT_ARGUMENTS_H_
 #define OR_TOOLS_MATH_OPT_CPP_SOLVER_INIT_ARGUMENTS_H_
 
-#include <memory>
-
 #include "ortools/math_opt/core/non_streamable_solver_init_arguments.h"  // IWYU pragma: export
 #include "ortools/math_opt/cpp/streamable_solver_init_arguments.h"  // IWYU pragma: export
 
 namespace operations_research::math_opt {
 
-// Arguments passed to Solve() and IncrementalSolver::New() to control the
+// Arguments passed to Solve() and NewIncrementalSolver() to control the
 // instantiation of the solver.
 //
 // Usage with streamable arguments:

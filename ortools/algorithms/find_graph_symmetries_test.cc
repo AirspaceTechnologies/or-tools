@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -47,7 +47,7 @@
 #include "ortools/base/helpers.h"
 #include "ortools/base/map_util.h"
 #include "ortools/base/path.h"
-#include "ortools/graph/io.h"
+#include "ortools/graph/graph_io.h"
 #include "ortools/graph/util.h"
 
 namespace operations_research {
@@ -63,7 +63,7 @@ using ::util::GraphIsSymmetric;
 
 // Shortcut that calls RecursivelyRefinePartitionByAdjacency() on all nodes
 // of a graph, and outputs the resulting partition.
-std::string FullyRefineGraph(const std::vector<std::pair<int, int>>& arcs) {
+std::string FullyRefineGraph(absl::Span<const std::pair<int, int>> arcs) {
   Graph graph;
   for (const std::pair<int, int>& arc : arcs) {
     graph.AddArc(arc.first, arc.second);
@@ -262,8 +262,8 @@ class FindSymmetriesTest : public ::testing::Test {
     return dense_perm;
   }
 
-  std::vector<int> ComposePermutations(const std::vector<int>& p1,
-                                       const std::vector<int>& p2) {
+  std::vector<int> ComposePermutations(absl::Span<const int> p1,
+                                       absl::Span<const int> p2) {
     CHECK_EQ(p1.size(), p2.size());
     std::vector<int> composed(p1.size(), -1);
     for (int i = 0; i < p1.size(); ++i) composed[i] = p1[p2[i]];
@@ -274,7 +274,7 @@ class FindSymmetriesTest : public ::testing::Test {
   // with some basic, non-through EXPECT(..) that check that each generator
   // does make the group grow.
   int ComputePermutationGroupSizeAndVerifyBasicIrreductibility(
-      const std::vector<std::unique_ptr<SparsePermutation>>& generators) {
+      absl::Span<const std::unique_ptr<SparsePermutation>> generators) {
     if (generators.empty()) return 1;  // The identity.
     const int num_nodes = generators[0]->Size();
     // The group only contains the identity at first.
@@ -374,7 +374,7 @@ TEST_F(FindSymmetriesTest, CyclesOfDifferentLength) {
 // This can be used to convert a list of M undirected edges into the list of
 // 2*M corresponding directed arcs.
 std::vector<std::pair<int, int>> AppendReversedPairs(
-    const std::vector<std::pair<int, int>>& pairs) {
+    absl::Span<const std::pair<int, int>> pairs) {
   std::vector<std::pair<int, int>> out;
   out.reserve(pairs.size() * 2);
   out.insert(out.begin(), pairs.begin(), pairs.end());
@@ -697,8 +697,7 @@ void AddReverseArcsAndFinalize(Graph* graph) {
   graph->Build();
 }
 
-void SetGraphEdges(const std::vector<std::pair<int, int>>& edges,
-                   Graph* graph) {
+void SetGraphEdges(absl::Span<const std::pair<int, int>> edges, Graph* graph) {
   DCHECK_EQ(graph->num_arcs(), 0);
   for (const auto [from, to] : edges) graph->AddArc(from, to);
   AddReverseArcsAndFinalize(graph);

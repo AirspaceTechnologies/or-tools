@@ -194,11 +194,11 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	"golang/protobuf/v2/proto/proto"
-	cmpb "ortools/sat/cp_model_go_proto"
-	"ortools/sat/go/cpmodel"
-	sppb "ortools/sat/sat_parameters_go_proto"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	cmpb "github.com/google/or-tools/ortools/sat/proto/cpmodel"
+	sppb "github.com/google/or-tools/ortools/sat/proto/satparameters"
+	"google.golang.org/protobuf/proto"
 )
 
 func solveWithTimeLimitSampleSat() error {
@@ -217,9 +217,9 @@ func solveWithTimeLimitSampleSat() error {
 	}
 
 	// Sets a time limit of 10 seconds.
-	params := sppb.SatParameters_builder{
+	params := &sppb.SatParameters{
 		MaxTimeInSeconds: proto.Float64(10.0),
-	}.Build()
+	}
 
 	// Solve.
 	response, err := cpmodel.SolveCpModelWithParameters(m, params)
@@ -240,7 +240,7 @@ func solveWithTimeLimitSampleSat() error {
 
 func main() {
 	if err := solveWithTimeLimitSampleSat(); err != nil {
-		glog.Exitf("solveWithTimeLimitSampleSat returned with error: %v", err)
+		log.Exitf("solveWithTimeLimitSampleSat returned with error: %v", err)
 	}
 }
 ```
@@ -375,11 +375,13 @@ import com.google.ortools.Loader;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.LinearExpr;
+import java.util.function.Consumer;
 
 /** Solves an optimization problem and displays all intermediate solutions. */
-public class SolveAndPrintIntermediateSolutionsSampleSat {
+public final class SolveAndPrintIntermediateSolutionsSampleSat {
   static class VarArraySolutionPrinterWithObjective extends CpSolverSolutionCallback {
     public VarArraySolutionPrinterWithObjective(IntVar[] variables) {
       variableArray = variables;
@@ -403,6 +405,27 @@ public class SolveAndPrintIntermediateSolutionsSampleSat {
     private final IntVar[] variableArray;
   }
 
+  static class BestBoundCallback implements Consumer<Double> {
+    public BestBoundCallback() {
+      bestBound = 0.0;
+      numImprovements = 0;
+    }
+
+    @Override
+    public void accept(Double bound) {
+      bestBound = bound;
+      numImprovements++;
+    }
+
+    public double getBestBound() {
+      return bestBound;
+    }
+
+    double bestBound;
+    int numImprovements;
+  }
+
+
   public static void main(String[] args) throws Exception {
     Loader.loadNativeLibraries();
     // Create the model.
@@ -425,10 +448,18 @@ public class SolveAndPrintIntermediateSolutionsSampleSat {
     CpSolver solver = new CpSolver();
     VarArraySolutionPrinterWithObjective cb =
         new VarArraySolutionPrinterWithObjective(new IntVar[] {x, y, z});
-    solver.solve(model, cb);
+    solver.getParameters().setNumWorkers(1);
+    solver.getParameters().setLinearizationLevel(2);
+    BestBoundCallback bestBoundCallback = new BestBoundCallback();
 
-    System.out.println(cb.getSolutionCount() + " solutions found.");
+    solver.setBestBoundCallback(bestBoundCallback);
+    CpSolverStatus unusedStatus = solver.solve(model, cb);
+
+    System.out.println("solution count: " + cb.getSolutionCount());
+    System.out.println("best bound count: " + bestBoundCallback.numImprovements);
   }
+
+  private SolveAndPrintIntermediateSolutionsSampleSat() {}
 }
 ```
 
@@ -504,10 +535,10 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	"golang/protobuf/v2/proto/proto"
-	"ortools/sat/go/cpmodel"
-	sppb "ortools/sat/sat_parameters_go_proto"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	sppb "github.com/google/or-tools/ortools/sat/proto/satparameters"
+	"google.golang.org/protobuf/proto"
 )
 
 func solveAndPrintIntermediateSolutionsSampleSat() error {
@@ -531,10 +562,10 @@ func solveAndPrintIntermediateSolutionsSampleSat() error {
 	// Currently, the CpModelBuilder does not allow for callbacks, so intermediate solutions
 	// cannot be printed while solving. However, the CP-SAT solver does allow for returning
 	// the intermediate solutions found while solving in the response.
-	params := sppb.SatParameters_builder{
+	params := &sppb.SatParameters{
 		FillAdditionalSolutionsInResponse: proto.Bool(true),
 		SolutionPoolSize:                  proto.Int32(10),
-	}.Build()
+	}
 	response, err := cpmodel.SolveCpModelWithParameters(m, params)
 	if err != nil {
 		return fmt.Errorf("failed to solve the model: %w", err)
@@ -552,7 +583,7 @@ func solveAndPrintIntermediateSolutionsSampleSat() error {
 
 func main() {
 	if err := solveAndPrintIntermediateSolutionsSampleSat(); err != nil {
-		glog.Exitf("solveAndPrintIntermediateSolutionsSampleSat returned with error: %v", err)
+		log.Exitf("solveAndPrintIntermediateSolutionsSampleSat returned with error: %v", err)
 	}
 }
 ```
@@ -707,6 +738,7 @@ import com.google.ortools.Loader;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.IntVar;
 
 /** Code sample that solves a model and displays all solutions. */
@@ -754,7 +786,7 @@ public class SearchForAllSolutionsSampleSat {
     // Tell the solver to enumerate all solutions.
     solver.getParameters().setEnumerateAllSolutions(true);
     // And solve.
-    solver.solve(model, cb);
+    CpSolverStatus unusedStatus = solver.solve(model, cb);
 
     System.out.println(cb.getSolutionCount() + " solutions found.");
   }
@@ -840,10 +872,10 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	"golang/protobuf/v2/proto/proto"
-	"ortools/sat/go/cpmodel"
-	sppb "ortools/sat/sat_parameters_go_proto"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	sppb "github.com/google/or-tools/ortools/sat/proto/satparameters"
+	"google.golang.org/protobuf/proto"
 )
 
 func searchForAllSolutionsSampleSat() error {
@@ -863,11 +895,11 @@ func searchForAllSolutionsSampleSat() error {
 	// Currently, the CpModelBuilder does not allow for callbacks, so each feasible solution cannot
 	// be printed while solving. However, the CP Solver can return all of the enumerated solutions
 	// in the response by setting the following parameters.
-	params := sppb.SatParameters_builder{
+	params := &sppb.SatParameters{
 		EnumerateAllSolutions:             proto.Bool(true),
 		FillAdditionalSolutionsInResponse: proto.Bool(true),
 		SolutionPoolSize:                  proto.Int32(27),
-	}.Build()
+	}
 	response, err := cpmodel.SolveCpModelWithParameters(m, params)
 	if err != nil {
 		return fmt.Errorf("failed to solve the model: %w", err)
@@ -885,7 +917,7 @@ func searchForAllSolutionsSampleSat() error {
 
 func main() {
 	if err := searchForAllSolutionsSampleSat(); err != nil {
-		glog.Exitf("searchForAllSolutionsSampleSat returned with error: %v", err)
+		log.Exitf("searchForAllSolutionsSampleSat returned with error: %v", err)
 	}
 }
 ```
@@ -1037,6 +1069,7 @@ import com.google.ortools.Loader;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.IntVar;
 
 /** Code sample that solves a model and displays a small number of solutions. */
@@ -1087,7 +1120,7 @@ public final class StopAfterNSolutionsSampleSat {
     // Tell the solver to enumerate all solutions.
     solver.getParameters().setEnumerateAllSolutions(true);
     // And solve.
-    solver.solve(model, cb);
+    CpSolverStatus unusedStatus = solver.solve(model, cb);
 
     System.out.println(cb.getSolutionCount() + " solutions found.");
     if (cb.getSolutionCount() != 5) {

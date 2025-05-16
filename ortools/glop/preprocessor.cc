@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -422,8 +422,8 @@ bool EmptyColumnPreprocessor::Run(LinearProgram* lp) {
         if (!IsFinite(value)) {
           VLOG(1) << "Problem INFEASIBLE_OR_UNBOUNDED, empty column " << col
                   << " has a minimization cost of " << objective_coefficient
-                  << " and bounds" << " [" << lower_bound << "," << upper_bound
-                  << "]";
+                  << " and bounds"
+                  << " [" << lower_bound << "," << upper_bound << "]";
           status_ = ProblemStatus::INFEASIBLE_OR_UNBOUNDED;
           return false;
         }
@@ -1390,10 +1390,10 @@ bool ImpliedFreePreprocessor::Run(LinearProgram* lp) {
   const int size = num_rows.value();
   // TODO(user) : Replace SumWithNegativeInfiniteAndOneMissing and
   // SumWithPositiveInfiniteAndOneMissing with IntervalSumWithOneMissing.
-  absl::StrongVector<RowIndex, SumWithNegativeInfiniteAndOneMissing> lb_sums(
-      size);
-  absl::StrongVector<RowIndex, SumWithPositiveInfiniteAndOneMissing> ub_sums(
-      size);
+  util_intops::StrongVector<RowIndex, SumWithNegativeInfiniteAndOneMissing>
+      lb_sums(size);
+  util_intops::StrongVector<RowIndex, SumWithPositiveInfiniteAndOneMissing>
+      ub_sums(size);
 
   // Initialize the sums by adding all the bounds of the variables.
   for (ColIndex col(0); col < num_cols; ++col) {
@@ -3677,7 +3677,7 @@ bool ShiftVariableBoundsPreprocessor::Run(LinearProgram* lp) {
   int num_bound_shifts = 0;
   const RowIndex num_rows = lp->num_constraints();
   KahanSum objective_offset;
-  absl::StrongVector<RowIndex, KahanSum> row_offsets(num_rows.value());
+  util_intops::StrongVector<RowIndex, KahanSum> row_offsets(num_rows.value());
   offsets_.assign(num_cols, 0.0);
   for (ColIndex col(0); col < num_cols; ++col) {
     if (0.0 < variable_initial_lbs_[col] || 0.0 > variable_initial_ubs_[col]) {

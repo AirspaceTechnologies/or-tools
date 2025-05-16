@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -38,6 +38,8 @@ constexpr absl::string_view kDeletedObjectiveDefaultDescription =
 
 // A value type that references an objective (either primary or auxiliary) from
 // ModelStorage. Usually this type is passed by copy.
+//
+// This type implements https://abseil.io/docs/cpp/guides/hash.
 class Objective {
  public:
   // The type used for ids.
@@ -73,6 +75,12 @@ class Objective {
 
   // Returns the constant offset of the objective.
   inline double offset() const;
+
+  // Returns the number of linear terms in the objective.
+  inline int64_t num_linear_terms() const;
+
+  // Returns the number of quadratic terms in the objective.
+  inline int64_t num_quadratic_terms() const;
 
   // Returns the linear coefficient for the variable in the model.
   inline double coefficient(Variable variable) const;
@@ -149,6 +157,14 @@ absl::string_view Objective::name() const {
 }
 
 double Objective::offset() const { return storage_->objective_offset(id_); }
+
+int64_t Objective::num_quadratic_terms() const {
+  return storage_->num_quadratic_objective_terms(id_);
+}
+
+int64_t Objective::num_linear_terms() const {
+  return storage_->num_linear_objective_terms(id_);
+}
 
 double Objective::coefficient(const Variable variable) const {
   CHECK_EQ(variable.storage(), storage_)

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -27,7 +27,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <numeric>  // must be call before fenv_access see: https://github.com/microsoft/STL/issues/2613
+// Needed before fenv_access. See https://github.com/microsoft/STL/issues/2613.
+#include <numeric>  // IWYU pragma:keep.
 #include <vector>
 
 #include "absl/log/check.h"
@@ -91,10 +92,16 @@ class ScopedFloatingPointEnv {
     fenv_.__control &= ~excepts;
 #elif (defined(__FreeBSD__) || defined(__OpenBSD__))
     fenv_.__x87.__control &= ~excepts;
+#elif defined(__NetBSD__)
+    fenv_.x87.control &= ~excepts;
 #else  // Linux
     fenv_.__control_word &= ~excepts;
 #endif
+#if defined(__NetBSD__)
+    fenv_.mxcsr &= ~(excepts << 7);
+#else
     fenv_.__mxcsr &= ~(excepts << 7);
+#endif
     CHECK_EQ(0, fesetenv(&fenv_));
 #endif
   }
@@ -206,7 +213,7 @@ inline bool IsIntegerWithinTolerance(FloatType x, FloatType tolerance) {
 //
 // TODO(user): incorporate the gcd computation here? The issue is that I am
 // not sure if I just do factor /= gcd that round(x * factor) will be the same.
-void GetBestScalingOfDoublesToInt64(const std::vector<double>& input,
+void GetBestScalingOfDoublesToInt64(absl::Span<const double> input,
                                     int64_t max_absolute_sum,
                                     double* scaling_factor,
                                     double* max_relative_coeff_error);

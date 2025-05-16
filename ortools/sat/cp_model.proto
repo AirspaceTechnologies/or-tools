@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,6 +18,7 @@ syntax = "proto3";
 package operations_research.sat;
 
 option csharp_namespace = "Google.OrTools.Sat";
+option go_package = "github.com/google/or-tools/ortools/sat/proto/cpmodel";
 option java_package = "com.google.ortools.sat";
 option java_multiple_files = true;
 option java_outer_classname = "CpModelProtobuf";
@@ -104,9 +105,13 @@ message LinearConstraintProto {
 // The constraint target = vars[index].
 // This enforces that index takes one of the value in [0, vars_size()).
 message ElementConstraintProto {
-  int32 index = 1;
-  int32 target = 2;
-  repeated int32 vars = 3;
+  int32 index = 1;          // Legacy field.
+  int32 target = 2;         // Legacy field.
+  repeated int32 vars = 3;  // Legacy field.
+  // All expressions below must be affine function with at most one variable.
+  LinearExpressionProto linear_index = 4;
+  LinearExpressionProto linear_target = 5;
+  repeated LinearExpressionProto exprs = 6;
 }
 
 // This is not really a constraint. It is there so it can be referred by other
@@ -155,8 +160,9 @@ message NoOverlap2DConstraintProto {
 // this constraint. Moreover, intervals of size zero are ignored.
 //
 // All demands must not contain any negative value in their domains. This is
-// checked at validation. The capacity can currently contains negative values,
-// but it will be propagated to >= 0 right away.
+// checked at validation. Even if there are no intervals, this constraint
+// implicit enforces capacity >= 0. In other words, a negative capacity is
+// considered valid but always infeasible.
 message CumulativeConstraintProto {
   LinearExpressionProto capacity = 1;
   repeated int32 intervals = 2;
@@ -242,12 +248,21 @@ message RoutesConstraintProto {
   int64 capacity = 5;
 }
 
-// The values of the n-tuple formed by the given variables can only be one of
+// The values of the n-tuple formed by the given expression can only be one of
 // the listed n-tuples in values. The n-tuples are encoded in a flattened way:
 //     [tuple0_v0, tuple0_v1, ..., tuple0_v{n-1}, tuple1_v0, ...].
+// Expressions must be affine (a * var + b).
+// Corner cases:
+//  - If all `vars`, `values` and `exprs` are empty, the constraint is trivially
+//    true, irrespective of the value of `negated`.
+//  - If `values` is empty but either vars or exprs is not, the constraint is
+//    trivially false if `negated` is false, and trivially true if `negated` is
+//    true.
+//  - If `vars` and `exprs` are empty but `values` is not, the model is invalid.
 message TableConstraintProto {
-  repeated int32 vars = 1;
+  repeated int32 vars = 1;  // Legacy field.
   repeated int64 values = 2;
+  repeated LinearExpressionProto exprs = 4;
 
   // If true, the meaning is "negated", that is we forbid any of the given
   // tuple from a feasible assignment.
@@ -261,7 +276,7 @@ message InverseConstraintProto {
   repeated int32 f_inverse = 2;
 }
 
-// This constraint forces a sequence of variables to be accepted by an
+// This constraint forces a sequence of expressions to be accepted by an
 // automaton.
 message AutomatonConstraintProto {
   // A state is identified by a non-negative number. It is preferable to keep
@@ -277,9 +292,12 @@ message AutomatonConstraintProto {
   repeated int64 transition_head = 5;
   repeated int64 transition_label = 6;
 
-  // The sequence of variables. The automaton is ran for vars_size() "steps" and
-  // the value of vars[i] corresponds to the transition label at step i.
+  // Legacy field.
   repeated int32 vars = 7;
+  // The sequence of affine expressions (a * var + b). The automaton is ran for
+  // exprs_size() "steps" and the value of exprs[i] corresponds to the
+  // transition label at step i.
+  repeated LinearExpressionProto exprs = 8;
 }
 
 // A list of variables, without any semantics.
@@ -544,6 +562,7 @@ message DecisionStrategyProto {
     SELECT_LOWER_HALF = 2;
     SELECT_UPPER_HALF = 3;
     SELECT_MEDIAN_VALUE = 4;
+    SELECT_RANDOM_HALF = 5;
   }
   DomainReductionStrategy domain_reduction_strategy = 3;
 }
@@ -698,7 +717,7 @@ enum CpSolverStatus {
   // An optimal feasible solution has been found.
   //
   // More generally, this status represent a success. So we also return OPTIMAL
-  // if we find a solution for a pure feasiblity problem or if a gap limit has
+  // if we find a solution for a pure feasibility problem or if a gap limit has
   // been specified and we return a solution within this limit. In the case
   // where we need to return all the feasible solution, this status will only be
   // returned if we enumerated all of them; If we stopped before, we will return
@@ -714,7 +733,7 @@ message CpSolverSolution {
 
 // The response returned by a solver trying to solve a CpModelProto.
 //
-// Next id: 31
+// Next id: 32
 message CpSolverResponse {
   // The status of the solve.
   CpSolverStatus status = 1;
@@ -752,10 +771,14 @@ message CpSolverResponse {
   // is only filled with the info derived during a normal search and we do not
   // have any dedicated algorithm to improve it.
   //
-  // If the problem is a feasibility problem, then these bounds will be valid
-  // for any feasible solution. If the problem is an optimization problem, then
-  // these bounds will only be valid for any OPTIMAL solutions, it can exclude
-  // sub-optimal feasible ones.
+  // Warning: if you didn't set keep_all_feasible_solutions_in_presolve, then
+  // these domains might exclude valid feasible solution. Otherwise for a
+  // feasibility problem, all feasible solution should be there.
+  //
+  // Warning: For an optimization problem, these will correspond to valid bounds
+  // for the problem of finding an improving solution to the best one found so
+  // far. It might be better to solve a feasibility version if one just want to
+  // explore the feasible region.
   repeated IntegerVariableProto tightened_variables = 21;
 
   // A subset of the model "assumptions" field. This will only be filled if the
@@ -799,6 +822,7 @@ message CpSolverResponse {
   // the default-search if none are specified.
   int64 num_integers = 30;
   int64 num_booleans = 10;
+  int64 num_fixed_booleans = 31;
   int64 num_conflicts = 11;
   int64 num_branches = 12;
   int64 num_binary_propagations = 13;

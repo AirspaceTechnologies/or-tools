@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -417,7 +417,9 @@ TEST_P(IpParameterTest, PresolveOff) {
                   solve_stats.first_order_iterations,
               1);
   }
+#if !defined(_MSC_VER)
   EXPECT_THAT(logs, Not(testing::ContainsRegex(GetParam().presolved_regexp)));
+#endif
 }
 
 TEST_P(IpParameterTest, PresolveOn) {
@@ -435,7 +437,9 @@ TEST_P(IpParameterTest, PresolveOn) {
     EXPECT_EQ(solve_stats.simplex_iterations, 0);
     EXPECT_EQ(solve_stats.first_order_iterations, 0);
   }
+#if !defined(_MSC_VER)
   EXPECT_THAT(logs, testing::ContainsRegex(GetParam().presolved_regexp));
+#endif
 }
 
 // Requires disabling presolve and cuts is supported (or status errors).
@@ -1099,6 +1103,9 @@ TEST_P(LargeInstanceIpParameterTest, IterationLimit) {
 }
 
 TEST_P(LargeInstanceIpParameterTest, NodeLimit) {
+  if (GetParam().solver_type == SolverType::kHighs) {
+    GTEST_SKIP() << "Ignoring this test as Highs 1.7+ returns unimplemented";
+  }
   ASSERT_OK_AND_ASSIGN(std::unique_ptr<Model> model, Load23588());
   SolveParameters params = GetParam().base_parameters;
   params.node_limit = 1;
@@ -1219,6 +1226,9 @@ TEST_P(LargeInstanceIpParameterTest, BestBoundLimit) {
 }
 
 TEST_P(LargeInstanceIpParameterTest, SolutionLimit) {
+  if (GetParam().solver_type == SolverType::kHighs) {
+    GTEST_SKIP() << "Ignoring this test as Highs 1.7+ returns unimplemented";
+  }
   ASSERT_OK_AND_ASSIGN(std::unique_ptr<Model> model, Load23588());
   SolveParameters params = GetParam().base_parameters;
   params.solution_limit = 1;

@@ -181,6 +181,7 @@ import com.google.ortools.Loader;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.LinearExpr;
 
@@ -211,7 +212,7 @@ public class SolutionHintingSampleSat {
     CpSolver solver = new CpSolver();
     VarArraySolutionPrinterWithObjective cb =
         new VarArraySolutionPrinterWithObjective(new IntVar[] {x, y, z});
-    solver.solve(model, cb);
+    CpSolverStatus unusedStatus = solver.solve(model, cb);
   }
 
   static class VarArraySolutionPrinterWithObjective extends CpSolverSolutionCallback {
@@ -309,9 +310,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/golang/glog"
-	cmpb "ortools/sat/cp_model_go_proto"
-	"ortools/sat/go/cpmodel"
+	log "github.com/golang/glog"
+	"github.com/google/or-tools/ortools/sat/go/cpmodel"
+	cmpb "github.com/google/or-tools/ortools/sat/proto/cpmodel"
 )
 
 func solutionHintingSampleSat() error {
@@ -352,7 +353,7 @@ func solutionHintingSampleSat() error {
 
 func main() {
 	if err := solutionHintingSampleSat(); err != nil {
-		glog.Exitf("solutionHintingSampleSat returned with error: %v", err)
+		log.Exitf("solutionHintingSampleSat returned with error: %v", err)
 	}
 }
 ```

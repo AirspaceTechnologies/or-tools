@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -188,8 +188,8 @@ void UpdateIdIndexMap(glop::StrictITIVector<IndexType, bool> indices_to_delete,
 
                       IndexType num_indices,
                       absl::flat_hash_map<int64_t, IndexType>& id_index_map) {
-  absl::StrongVector<IndexType, IndexType> new_indices(num_indices.value(),
-                                                       IndexType(0));
+  util_intops::StrongVector<IndexType, IndexType> new_indices(
+      num_indices.value(), IndexType(0));
   IndexType new_index(0);
   for (IndexType index(0); index < num_indices; ++index) {
     if (indices_to_delete[index]) {
@@ -766,6 +766,8 @@ absl::StatusOr<SolveResultProto> GlopSolver::Solve(
     const MessageCallback message_cb,
     const CallbackRegistrationProto& callback_registration, const Callback,
     const SolveInterrupter* const interrupter) {
+  RETURN_IF_ERROR(ModelSolveParametersAreSupported(
+      model_parameters, kGlopSupportedStructures, "Glop"));
   RETURN_IF_ERROR(CheckRegisteredCallbackEvents(callback_registration,
                                                 /*supported_events=*/{}));
 

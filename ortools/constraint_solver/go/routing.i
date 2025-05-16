@@ -23,8 +23,11 @@
 namespace operations_research {
 class RoutingModelParameters;
 class RoutingSearchParameters;
+class RoutingSearchStatus;
+class FloatSlopePiecewiseLinearFunction;
 typedef std::function<int64_t(int64_t)> RoutingTransitCallback1;
 typedef std::function<int64_t(int64_t, int64_t)> RoutingTransitCallback2;
+typedef std::function<const FloatSlopePiecewiseLinearFunction*(int64_t, int64_t)> RoutingCumulDependentTransitCallback2;
 typedef std::function<void()> AtSolutionCallback;
 }  // namespace operations_research
 
@@ -135,6 +138,8 @@ PROTO2_RETURN(operations_research::RoutingSearchParameters,
               RoutingSearchParameters)
 PROTO2_RETURN(operations_research::RoutingModelParameters,
               RoutingModelParameters)
+PROTO_ENUM_RETURN(operations_research::RoutingSearchStatus::Value,
+                  RoutingSearchStatus_Value)
 
 // TODO(user): Replace with %ignoreall/%unignoreall
 //swiglint: disable include-h-allglobals

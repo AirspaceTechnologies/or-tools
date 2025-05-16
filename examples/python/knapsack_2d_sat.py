@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -71,7 +71,9 @@ def build_data() -> tuple[pd.Series, int, int]:
     return (data, max_height, max_width)
 
 
-def solve_with_duplicate_items(data: pd.Series, max_height: int, max_width: int):
+def solve_with_duplicate_items(
+    data: pd.Series, max_height: int, max_width: int
+) -> None:
     """solve the problem by building 2 items (rotated or not) for each item."""
     # Derived data (expanded to individual items).
     data_widths = data["width"].to_numpy()
@@ -162,7 +164,7 @@ def solve_with_duplicate_items(data: pd.Series, max_height: int, max_width: int)
     status = solver.solve(model)
 
     # Report solution.
-    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         used = {i for i in range(num_items) if solver.boolean_value(is_used[i])}
         data = pd.DataFrame(
             {
@@ -264,7 +266,7 @@ def solve_with_duplicate_optional_items(
     status = solver.solve(model)
 
     # Report solution.
-    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         used = {i for i in range(num_items) if solver.boolean_value(is_used[i])}
         data = pd.DataFrame(
             {
@@ -385,7 +387,7 @@ def solve_with_rotations(data: pd.Series, max_height: int, max_width: int):
     status = solver.solve(model)
 
     # Report solution.
-    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         used = {i for i in range(num_items) if solver.boolean_value(is_used[i])}
         data = pd.DataFrame(
             {

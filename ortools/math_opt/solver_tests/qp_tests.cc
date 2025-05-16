@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -202,9 +202,8 @@ TEST_P(IncrementalQpTest, EmptyUpdate) {
 
   UnivariateQpProblem qp_problem(GetParam().use_integer_variables);
 
-  ASSERT_OK_AND_ASSIGN(
-      const std::unique_ptr<IncrementalSolver> solver,
-      IncrementalSolver::New(&qp_problem.model, TestedSolver()));
+  ASSERT_OK_AND_ASSIGN(const std::unique_ptr<IncrementalSolver> solver,
+                       NewIncrementalSolver(&qp_problem.model, TestedSolver()));
   ASSERT_OK_AND_ASSIGN(const SolveResult first_result,
                        solver->Solve({.parameters = GetParam().parameters}));
   ASSERT_THAT(first_result,
@@ -234,9 +233,8 @@ TEST_P(IncrementalQpTest, LinearToQuadraticUpdate) {
   // We remove the quadratic coefficient x * x from the objective, leaving an LP
   UnivariateQpProblem qp_problem(GetParam().use_integer_variables);
   qp_problem.model.set_objective_coefficient(qp_problem.x, qp_problem.x, 0);
-  ASSERT_OK_AND_ASSIGN(
-      const std::unique_ptr<IncrementalSolver> solver,
-      IncrementalSolver::New(&qp_problem.model, TestedSolver()));
+  ASSERT_OK_AND_ASSIGN(const std::unique_ptr<IncrementalSolver> solver,
+                       NewIncrementalSolver(&qp_problem.model, TestedSolver()));
   ASSERT_OK_AND_ASSIGN(const SolveResult first_result,
                        solver->Solve({.parameters = GetParam().parameters}));
   ASSERT_THAT(first_result, IsOptimal(0.0625 - 0.5));
@@ -289,9 +287,8 @@ TEST_P(IncrementalQpTest, ModifyQuadraticObjective) {
 
   UnivariateQpProblem qp_problem(GetParam().use_integer_variables);
 
-  ASSERT_OK_AND_ASSIGN(
-      const std::unique_ptr<IncrementalSolver> solver,
-      IncrementalSolver::New(&qp_problem.model, TestedSolver()));
+  ASSERT_OK_AND_ASSIGN(const std::unique_ptr<IncrementalSolver> solver,
+                       NewIncrementalSolver(&qp_problem.model, TestedSolver()));
   ASSERT_OK_AND_ASSIGN(const SolveResult first_result,
                        solver->Solve({.parameters = GetParam().parameters}));
   ASSERT_THAT(first_result,
@@ -327,9 +324,8 @@ TEST_P(IncrementalQpTest, DeleteVariable) {
 
   SimplexConstrainedQpProblem qp_problem(GetParam().use_integer_variables);
 
-  ASSERT_OK_AND_ASSIGN(
-      const std::unique_ptr<IncrementalSolver> solver,
-      IncrementalSolver::New(&qp_problem.model, TestedSolver()));
+  ASSERT_OK_AND_ASSIGN(const std::unique_ptr<IncrementalSolver> solver,
+                       NewIncrementalSolver(&qp_problem.model, TestedSolver()));
   ASSERT_OK_AND_ASSIGN(const SolveResult first_result,
                        solver->Solve({.parameters = GetParam().parameters}));
   ASSERT_THAT(first_result,

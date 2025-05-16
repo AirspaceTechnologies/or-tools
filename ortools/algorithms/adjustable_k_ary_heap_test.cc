@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,32 +16,12 @@
 #include <limits>
 #include <queue>
 #include <random>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
 
 namespace operations_research {
-
-class PriorityAggregate {
- public:
-  using Index = int;
-  using Priority = float;
-  PriorityAggregate() = default;
-  PriorityAggregate(Priority priority, Index index)
-      : index_(index), priority_(priority) {}
-  Priority priority() const { return priority_; }
-  Index index() const { return index_; }
-  inline bool operator<(const PriorityAggregate other) const {
-    if (other.priority() != priority()) {
-      return priority() < other.priority();
-    }
-    return index() < other.index();
-  }
-
- private:
-  Index index_;
-  Priority priority_;
-};
 
 TEST(AdjustableKAryHeapTest, RandomDataStrongCheck) {
   const int kSize = 10'000;
@@ -49,17 +29,16 @@ TEST(AdjustableKAryHeapTest, RandomDataStrongCheck) {
   std::random_device rd;
   std::mt19937 generator(rd());  // Mersenne Twister generator
   std::uniform_real_distribution<float> priority_dist(0, priority_range);
-  std::vector<PriorityAggregate> subsets_and_values(kSize);
+  std::vector<std::pair<float, int>> subsets_and_values(kSize);
   for (int i = 0; i < kSize; ++i) {
     subsets_and_values[i] = {priority_dist(generator), i};
   }
 
-  AdjustableKAryHeap<PriorityAggregate, 5, true> heap(subsets_and_values,
-                                                      kSize);
+  AdjustableKAryHeap<float, int, 5, true> heap(subsets_and_values, kSize);
   EXPECT_TRUE(heap.CheckHeapProperty());
   float last = std::numeric_limits<float>::max();
   while (!heap.IsEmpty()) {
-    const auto prio = heap.Top().priority();
+    const auto prio = heap.TopPriority();
     heap.Pop();
     EXPECT_LE(prio, last);
     last = prio;
@@ -74,13 +53,12 @@ TEST(AdjustableKAryHeapTest, RandomDataSpeed) {
   std::random_device rd;
   std::mt19937 generator(rd());  // Mersenne Twister generator
   std::uniform_real_distribution<float> priority_dist(0, priority_range);
-  std::vector<PriorityAggregate> subsets_and_values(kSize);
+  std::vector<std::pair<float, int>> subsets_and_values(kSize);
   for (int i = 0; i < kSize; ++i) {
     subsets_and_values[i] = {priority_dist(generator), i};
   }
 
-  AdjustableKAryHeap<PriorityAggregate, 4, true> heap(subsets_and_values,
-                                                      kSize);
+  AdjustableKAryHeap<float, int, 4, true> heap(subsets_and_values, kSize);
   EXPECT_TRUE(heap.CheckHeapProperty());
   while (!heap.IsEmpty()) {
     heap.Pop();
@@ -96,13 +74,12 @@ TEST(AdjustableKAryHeapTest, UpdateStrongCheck) {
   std::random_device rd;
   std::mt19937 generator(rd());  // Mersenne Twister generator
   std::uniform_real_distribution<float> priority_dist(0, priority_range);
-  std::uniform_int_distribution<int> index_dist(0, kSize);
-  std::vector<PriorityAggregate> subsets_and_values(kSize);
+  std::uniform_int_distribution<int> index_dist(0, kSize - 1);
+  std::vector<std::pair<float, int>> subsets_and_values(kSize);
   for (int i = 0; i < kSize; ++i) {
     subsets_and_values[i] = {priority_dist(generator), i};
   }
-  AdjustableKAryHeap<PriorityAggregate, 4, true> heap(subsets_and_values,
-                                                      kSize);
+  AdjustableKAryHeap<float, int, 4, true> heap(subsets_and_values, kSize);
   EXPECT_TRUE(heap.CheckHeapProperty());
   for (int iter = 0; iter < kNumUpdates; ++iter) {
     heap.Update({priority_dist(generator), index_dist(generator)});
@@ -117,13 +94,12 @@ TEST(AdjustableKAryHeapTest, RemoveStrongCheck) {
   std::random_device rd;
   std::mt19937 generator(rd());  // Mersenne Twister generator
   std::uniform_real_distribution<float> priority_dist(0, priority_range);
-  std::uniform_int_distribution<int> index_dist(0, kSize);
-  std::vector<PriorityAggregate> subsets_and_values(kSize);
+  std::uniform_int_distribution<int> index_dist(0, kSize - 1);
+  std::vector<std::pair<float, int>> subsets_and_values(kSize);
   for (int i = 0; i < kSize; ++i) {
     subsets_and_values[i] = {priority_dist(generator), i};
   }
-  AdjustableKAryHeap<PriorityAggregate, 4, true> heap(subsets_and_values,
-                                                      kSize);
+  AdjustableKAryHeap<float, int, 4, true> heap(subsets_and_values, kSize);
   EXPECT_TRUE(heap.CheckHeapProperty());
   for (int iter = 0; iter < kNumRemovals; ++iter) {
     heap.Remove(iter);
@@ -138,9 +114,9 @@ TEST(AdjustableKAryHeapTest, OneByOneStrongCheck) {
   std::random_device rd;
   std::mt19937 generator(rd());  // Mersenne Twister generator
   std::uniform_real_distribution<float> priority_dist(0, priority_range);
-  std::uniform_int_distribution<int> index_dist(0, kSize);
-  std::vector<PriorityAggregate> subsets_and_values;
-  AdjustableKAryHeap<PriorityAggregate, 4, true> heap;
+  std::uniform_int_distribution<int> index_dist(0, kSize - 1);
+  std::vector<std::pair<float, int>> subsets_and_values;
+  AdjustableKAryHeap<float, int, 4, true> heap;
   EXPECT_TRUE(heap.CheckHeapProperty());
   for (int iter = 0; iter < kNumInsertions; ++iter) {
     heap.Insert({priority_dist(generator), index_dist(generator)});
@@ -155,9 +131,9 @@ TEST(AdjustableKAryHeapTest, OneByOneStrongSpeed) {
   std::random_device rd;
   std::mt19937 generator(rd());  // Mersenne Twister generator
   std::uniform_real_distribution<float> priority_dist(0, priority_range);
-  std::uniform_int_distribution<int> index_dist(0, kSize);
-  std::vector<PriorityAggregate> subsets_and_values;
-  AdjustableKAryHeap<PriorityAggregate, 4, true> heap;
+  std::uniform_int_distribution<int> index_dist(0, kSize - 1);
+  std::vector<std::pair<float, int>> subsets_and_values;
+  AdjustableKAryHeap<float, int, 4, true> heap;
   EXPECT_TRUE(heap.CheckHeapProperty());
   for (int iter = 0; iter < kNumInsertions; ++iter) {
     heap.Insert({priority_dist(generator), index_dist(generator)});
@@ -182,4 +158,17 @@ TEST(StandardHeapTest, RandomDataSpeed) {
   }
 }
 
+TEST(AdjustableKAryHeapTest, DoubleInsertionOneRemoval) {
+  const int kSize = 10'000;
+  AdjustableKAryHeap<float, int, 4, true> heap;
+
+  for (int i = 0; i < kSize; ++i) {
+    heap.Insert({static_cast<float>(i), i});
+    heap.Insert({static_cast<float>(i + 1), i});
+    heap.Remove(i);
+
+    EXPECT_FALSE(heap.Contains(i));
+  }
+  EXPECT_TRUE(heap.CheckHeapProperty());
+}
 }  // namespace operations_research

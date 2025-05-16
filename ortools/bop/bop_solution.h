@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -81,10 +81,10 @@ class BopSolution {
   }
 
   // For range based iteration, i.e. for (const bool value : solution) {...}.
-  absl::StrongVector<VariableIndex, bool>::const_iterator begin() const {
+  util_intops::StrongVector<VariableIndex, bool>::const_iterator begin() const {
     return values_.begin();
   }
-  absl::StrongVector<VariableIndex, bool>::const_iterator end() const {
+  util_intops::StrongVector<VariableIndex, bool>::const_iterator end() const {
     return values_.end();
   }
 
@@ -103,7 +103,7 @@ class BopSolution {
 
   const sat::LinearBooleanProblem* problem_;
   std::string name_;
-  absl::StrongVector<VariableIndex, bool> values_;
+  util_intops::StrongVector<VariableIndex, bool> values_;
 
   // Those are mutable because they behave as const values for a given solution
   // but for performance reasons we want to be lazy on their computation,

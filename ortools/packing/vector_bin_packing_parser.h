@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -36,7 +36,7 @@ class VbpParser {
  public:
   // Return true iff there were no error, in which case problem() can be
   // called to retrieve the parsed problem.
-  bool ParseFile(const std::string& data_filename);
+  bool ParseFile(absl::string_view data_filename);
 
   // We keep the fully qualified name for SWIG.
   ::operations_research::packing::vbp::VectorBinPackingProblem problem() const {

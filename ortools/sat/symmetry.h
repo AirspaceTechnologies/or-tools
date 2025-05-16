@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 #ifndef OR_TOOLS_SAT_SYMMETRY_H_
 #define OR_TOOLS_SAT_SYMMETRY_H_
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -69,8 +70,8 @@ class SymmetryPropagator : public SatPropagator {
 
   bool Propagate(Trail* trail) final;
   void Untrail(const Trail& trail, int trail_index) final;
-  absl::Span<const Literal> Reason(const Trail& trail,
-                                   int trail_index) const final;
+  absl::Span<const Literal> Reason(const Trail& trail, int trail_index,
+                                   int64_t conflict_id) const final;
 
   // Adds a new permutation to this symmetry propagator. The ownership is
   // transferred. This must be an integer permutation such that:
@@ -114,7 +115,7 @@ class SymmetryPropagator : public SatPropagator {
     int permutation_index;
     Literal image;
   };
-  absl::StrongVector<LiteralIndex, std::vector<ImageInfo>> images_;
+  util_intops::StrongVector<LiteralIndex, std::vector<ImageInfo>> images_;
 
   // For each permutation p, we maintain the list of all assigned literals
   // affected by p whose trail index is < propagation_trail_index_; sorted by
@@ -145,7 +146,7 @@ class SymmetryPropagator : public SatPropagator {
   // The identity permutation over all the literals.
   // This is temporary modified to encode a sparse permutation and then always
   // restored to the identity.
-  mutable absl::StrongVector<LiteralIndex, Literal> tmp_literal_mapping_;
+  mutable util_intops::StrongVector<LiteralIndex, Literal> tmp_literal_mapping_;
 
   // Symmetry reason indexed by trail_index.
   struct ReasonInfo {

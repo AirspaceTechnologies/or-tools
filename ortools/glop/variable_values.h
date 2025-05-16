@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -111,7 +111,7 @@ class VariableValues {
   // update_basic_variables is true. The update is done in an incremental way
   // and is thus more efficient than calling afterwards
   // RecomputeBasicVariableValues() and RecomputeDualPrices().
-  void UpdateGivenNonBasicVariables(const std::vector<ColIndex>& cols_to_update,
+  void UpdateGivenNonBasicVariables(absl::Span<const ColIndex> cols_to_update,
                                     bool update_basic_variables);
 
   // Functions dealing with the primal-infeasible basic variables. A basic

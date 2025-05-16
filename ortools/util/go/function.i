@@ -45,20 +45,10 @@
 #define FE_5(action,a1,a2,a3,a4,a5) action(0,a1), action(1,a2), action(2,a3), action(3,a4), action(4,a5)
 
 #define GET_MACRO(_1,_2,_3,_4,_5,NAME,...) NAME
-%define FOR_EACH(action,...) GET_MACRO(__VA_ARGS__, FE_5, FE_4, FE_3, FE_2, FE_1, FE_0)(action,__VA_ARGS__) %enddef
-
-// HACK: Work around SWIG bug not honoring ##__VA_ARGS__ or __VA_OPT__ which
-// should be available in version 4.3.0.
-// Instead of extending FOR_EACH with these to support zero-argument callbacks,
-// we use the following macro to define a function signature, and check if one
-// exists with zero arguments.
-%define DEF(Name, Ret, ...)
-  #define Name##Ret##Args##__VA_ARGS__
-%enddef
+%define FOR_EACH(action,...) GET_MACRO(__VA_ARGS__ __VA_OPT__(,) FE_5, FE_4, FE_3, FE_2, FE_1, FE_0)(action __VA_OPT__(,) __VA_ARGS__) %enddef
 
 // Definition
 %define STD_FUNCTION_AS_GO(Name, Ret, ...)
-DEF(Name, Ret, __VA_ARGS__)
 
 %feature("director") Name##Impl;
 
@@ -96,28 +86,12 @@ DEF(Name, Ret, __VA_ARGS__)
   }
 
   type overwrittenMethodsOn##Name##Impl struct {
-    i Name##Impl%}
-#if defined Name##Ret##Args
-%insert(go_header)
-%{    goCb func() GO_TYPE(Ret)
+    i Name##Impl
+    goCb func(FOR_EACH(lvalgo __VA_OPT__(,) __VA_ARGS__)) GO_TYPE(Ret)
   }
-%}
-#else
-%insert(go_header)
-%{    goCb func(FOR_EACH(lvalgo, __VA_ARGS__)) GO_TYPE(Ret)
-  }
-%}
-#endif
-#if defined Name##Ret##Args
-%insert(go_header)
-%{  func NewGo##Name##Wrapper(goCb func() GO_TYPE(Ret)) Go##Name##Wrapper {%}
-#else
-%insert(go_header)
-%{
-  func NewGo##Name##Wrapper(goCb func(FOR_EACH(lvalgo, __VA_ARGS__)) GO_TYPE(Ret)) Go##Name##Wrapper {%}
-#endif
-%insert(go_header)
-%{    om := &overwrittenMethodsOn##Name##Impl{
+
+  func NewGo##Name##Wrapper(goCb func(FOR_EACH(lvalgo __VA_OPT__(,) __VA_ARGS__)) GO_TYPE(Ret)) Go##Name##Wrapper {
+    om := &overwrittenMethodsOn##Name##Impl{
       goCb: goCb,
     }
     om.i = NewDirector##Name##Impl(om)
@@ -129,30 +103,15 @@ DEF(Name, Ret, __VA_ARGS__)
 
     return g
   }
-%}
-#if defined Name##Ret##Args
-%insert(go_header)
-%{  // callback implementation
-  func (o *overwrittenMethodsOn##Name##Impl) Call() GO_TYPE(Ret) {
-    GO_RETURN(Ret) o.goCb()
-  }
-%}
-#else
-%insert(go_header)
-%{  // callback implementation
-  func (o *overwrittenMethodsOn##Name##Impl) Call(FOR_EACH(lvalgo, __VA_ARGS__)) GO_TYPE(Ret) {
-    GO_RETURN(Ret) o.goCb(FOR_EACH(unpack, __VA_ARGS__))
-  }
-%}
-#endif
 
-#if defined Name##Ret##Args
-%rename(Name) std::function<Ret()>;
-%rename(call) std::function<Ret(__VA_ARGS__)>::operator();
-#else
+  // callback implementation
+  func (o *overwrittenMethodsOn##Name##Impl) Call(FOR_EACH(lvalgo __VA_OPT__(,) __VA_ARGS__)) GO_TYPE(Ret) {
+    GO_RETURN(Ret) o.goCb(FOR_EACH(unpack __VA_OPT__(,) __VA_ARGS__))
+  }
+%}
+
 %rename(Name) std::function<Ret(__VA_ARGS__)>;
 %rename(call) std::function<Ret(__VA_ARGS__)>::operator();
-#endif
 
 namespace std {
   struct function<Ret(__VA_ARGS__)> {
@@ -166,15 +125,9 @@ namespace std {
     function<Ret(__VA_ARGS__)>(Ret(*const)(__VA_ARGS__));
 
     %extend {
-
       function<Ret(__VA_ARGS__)>(Name##Impl *in) {
-#if defined Name##Ret##Args
-        return new std::function<Ret(__VA_ARGS__)>([=](){
-          return in->call();
-#else
-        return new std::function<Ret(__VA_ARGS__)>([=](FOR_EACH(lvalref, ##__VA_ARGS__)){
-          return in->call(FOR_EACH(forward, ##__VA_ARGS__));
-#endif
+        return new std::function<Ret(__VA_ARGS__)>([=](FOR_EACH(lvalref __VA_OPT__(,) __VA_ARGS__)){
+          return in->call(FOR_EACH(forward __VA_OPT__(,) __VA_ARGS__));
        });
       }
     }

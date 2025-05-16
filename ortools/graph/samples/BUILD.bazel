@@ -1,4 +1,4 @@
-# Copyright 2010-2024 Google LLC
+# Copyright 2010-2025 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -37,6 +37,16 @@ code_sample_cc(name = "dag_shortest_path_sequential")
 
 code_sample_cc(name = "dag_simple_shortest_path")
 
+code_sample_cc(name = "dag_multiple_shortest_paths_one_to_all")
+
+code_sample_cc(name = "dag_multiple_shortest_paths_sequential")
+
+code_sample_cc(name = "dag_simple_multiple_shortest_paths")
+
+code_sample_cc(name = "dag_constrained_shortest_path_sequential")
+
+code_sample_cc(name = "dag_simple_constrained_shortest_path")
+
 code_sample_cc(name = "dijkstra_all_pairs_shortest_paths")
 
 code_sample_cc(name = "dijkstra_directed")
@@ -46,6 +56,10 @@ code_sample_cc(name = "dijkstra_one_to_all")
 code_sample_cc(name = "dijkstra_sequential")
 
 code_sample_cc(name = "dijkstra_undirected")
+
+code_sample_cc(name = "root_a_tree")
+
+code_sample_cc(name = "rooted_tree_paths")
 
 code_sample_java(name = "SimpleMaxFlowProgram")
 

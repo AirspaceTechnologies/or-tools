@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -5361,8 +5361,10 @@ class PosIntSquare : public IntSquare {
     if (m <= 0) {
       return;
     }
-    const int64_t root =
-        static_cast<int64_t>(ceil(sqrt(static_cast<double>(m))));
+    int64_t root = static_cast<int64_t>(ceil(sqrt(static_cast<double>(m))));
+    if (CapProd(root, root) < m) {
+      root++;
+    }
     expr_->SetMin(root);
   }
   int64_t Max() const override {
@@ -5378,8 +5380,11 @@ class PosIntSquare : public IntSquare {
     if (m == std::numeric_limits<int64_t>::max()) {
       return;
     }
-    const int64_t root =
-        static_cast<int64_t>(floor(sqrt(static_cast<double>(m))));
+    int64_t root = static_cast<int64_t>(floor(sqrt(static_cast<double>(m))));
+    if (CapProd(root, root) > m) {
+      root--;
+    }
+
     expr_->SetMax(root);
   }
 };

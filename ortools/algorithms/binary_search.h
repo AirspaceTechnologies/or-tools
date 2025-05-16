@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,7 +14,6 @@
 #ifndef OR_TOOLS_ALGORITHMS_BINARY_SEARCH_H_
 #define OR_TOOLS_ALGORITHMS_BINARY_SEARCH_H_
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -23,7 +22,7 @@
 #include "absl/functional/function_ref.h"
 #include "absl/log/check.h"
 #include "absl/numeric/int128.h"
-#include "ortools/base/dump_vars.h"
+#include "absl/types/span.h"
 #include "ortools/base/logging.h"
 
 namespace operations_research {

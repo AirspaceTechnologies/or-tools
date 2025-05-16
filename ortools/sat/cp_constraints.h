@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,18 +16,15 @@
 
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <vector>
 
 #include "absl/log/check.h"
 #include "absl/types/span.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/types.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
-#include "ortools/util/rev.h"
-#include "ortools/util/strong_integers.h"
 
 namespace operations_research {
 namespace sat {
@@ -71,7 +68,8 @@ class BooleanXorPropagator : public PropagatorInterface {
 // This constraint take care of this case when no selectors[i] is chosen yet.
 //
 // This constraint support duplicate selectors.
-class GreaterThanAtLeastOneOfPropagator : public PropagatorInterface {
+class GreaterThanAtLeastOneOfPropagator : public PropagatorInterface,
+                                          public LazyReasonInterface {
  public:
   GreaterThanAtLeastOneOfPropagator(IntegerVariable target_var,
                                     absl::Span<const AffineExpression> exprs,
@@ -88,17 +86,22 @@ class GreaterThanAtLeastOneOfPropagator : public PropagatorInterface {
   bool Propagate() final;
   void RegisterWith(GenericLiteralWatcher* watcher);
 
+  // For LazyReasonInterface.
+  void Explain(int id, IntegerValue propagation_slack,
+               IntegerVariable var_to_explain, int trail_index,
+               std::vector<Literal>* literals_reason,
+               std::vector<int>* trail_indices_reason) final;
+
  private:
   const IntegerVariable target_var_;
-  const std::vector<AffineExpression> exprs_;
-  const std::vector<Literal> selectors_;
   const std::vector<Literal> enforcements_;
+
+  // Non-const as we swap elements around.
+  std::vector<Literal> selectors_;
+  std::vector<AffineExpression> exprs_;
 
   Trail* trail_;
   IntegerTrail* integer_trail_;
-
-  std::vector<Literal> literal_reason_;
-  std::vector<IntegerLiteral> integer_reason_;
 };
 
 // ============================================================================
@@ -106,7 +109,7 @@ class GreaterThanAtLeastOneOfPropagator : public PropagatorInterface {
 // ============================================================================
 
 inline std::vector<IntegerValue> ToIntegerValueVector(
-    const std::vector<int64_t>& input) {
+    absl::Span<const int64_t> input) {
   std::vector<IntegerValue> result(input.size());
   for (int i = 0; i < input.size(); ++i) {
     result[i] = IntegerValue(input[i]);
@@ -155,10 +158,13 @@ inline std::function<void(Model*)> GreaterThanAtLeastOneOf(
 // Note(user): If there is just one or two candidates, this doesn't add
 // anything.
 inline std::function<void(Model*)> PartialIsOneOfVar(
-    IntegerVariable target_var, const std::vector<IntegerVariable>& vars,
-    const std::vector<Literal>& selectors) {
+    IntegerVariable target_var, absl::Span<const IntegerVariable> vars,
+    absl::Span<const Literal> selectors) {
   CHECK_EQ(vars.size(), selectors.size());
-  return [=](Model* model) {
+  return [=,
+          selectors = std::vector<Literal>(selectors.begin(), selectors.end()),
+          vars = std::vector<IntegerVariable>(vars.begin(), vars.end())](
+             Model* model) {
     const std::vector<IntegerValue> offsets(vars.size(), IntegerValue(0));
     if (vars.size() > 2) {
       // Propagate the min.

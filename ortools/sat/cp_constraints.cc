@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,6 +18,7 @@
 
 #include "absl/types/span.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/integer_base.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/util/strong_integers.h"
@@ -83,11 +84,40 @@ GreaterThanAtLeastOneOfPropagator::GreaterThanAtLeastOneOfPropagator(
     const absl::Span<const Literal> selectors,
     const absl::Span<const Literal> enforcements, Model* model)
     : target_var_(target_var),
-      exprs_(exprs.begin(), exprs.end()),
-      selectors_(selectors.begin(), selectors.end()),
       enforcements_(enforcements.begin(), enforcements.end()),
+      selectors_(selectors.begin(), selectors.end()),
+      exprs_(exprs.begin(), exprs.end()),
       trail_(model->GetOrCreate<Trail>()),
       integer_trail_(model->GetOrCreate<IntegerTrail>()) {}
+
+void GreaterThanAtLeastOneOfPropagator::Explain(
+    int id, IntegerValue propagation_slack, IntegerVariable /*var_to_explain*/,
+    int /*trail_index*/, std::vector<Literal>* literals_reason,
+    std::vector<int>* trail_indices_reason) {
+  literals_reason->clear();
+  trail_indices_reason->clear();
+
+  const int first_non_false = id;
+  const IntegerValue target_min = propagation_slack;
+
+  for (const Literal l : enforcements_) {
+    literals_reason->push_back(l.Negated());
+  }
+  for (int i = 0; i < first_non_false; ++i) {
+    // If the level zero bounds is good enough, no reason needed.
+    //
+    // TODO(user): We could also skip this if we already have the reason for
+    // the expression being high enough in the current conflict.
+    if (integer_trail_->LevelZeroLowerBound(exprs_[i]) >= target_min) {
+      continue;
+    }
+
+    literals_reason->push_back(selectors_[i]);
+  }
+  integer_trail_->AddAllGreaterThanConstantReason(
+      absl::MakeSpan(exprs_).subspan(first_non_false), target_min,
+      trail_indices_reason);
+}
 
 bool GreaterThanAtLeastOneOfPropagator::Propagate() {
   // TODO(user): In case of a conflict, we could push one of them to false if
@@ -101,41 +131,44 @@ bool GreaterThanAtLeastOneOfPropagator::Propagate() {
   // Propagate() calls.
   IntegerValue target_min = kMaxIntegerValue;
   const IntegerValue current_min = integer_trail_->LowerBound(target_var_);
-  for (int i = 0; i < exprs_.size(); ++i) {
-    if (trail_->Assignment().LiteralIsTrue(selectors_[i])) return true;
-    if (trail_->Assignment().LiteralIsFalse(selectors_[i])) continue;
-    target_min = std::min(target_min, integer_trail_->LowerBound(exprs_[i]));
+  const AssignmentView assignment(trail_->Assignment());
 
-    // Abort if we can't get a better bound.
-    if (target_min <= current_min) return true;
+  int first_non_false = 0;
+  const int size = exprs_.size();
+  Literal* const selectors = selectors_.data();
+  AffineExpression* const exprs = exprs_.data();
+  for (int i = 0; i < size; ++i) {
+    if (assignment.LiteralIsTrue(selectors[i])) return true;
+
+    // The permutation is needed to have proper lazy reason.
+    if (assignment.LiteralIsFalse(selectors[i])) {
+      if (i != first_non_false) {
+        std::swap(selectors[i], selectors[first_non_false]);
+        std::swap(exprs[i], exprs[first_non_false]);
+      }
+      ++first_non_false;
+      continue;
+    }
+
+    const IntegerValue min = integer_trail_->LowerBound(exprs[i]);
+    if (min < target_min) {
+      target_min = min;
+
+      // Abort if we can't get a better bound.
+      if (target_min <= current_min) return true;
+    }
   }
+
   if (target_min == kMaxIntegerValue) {
     // All false, conflit.
     *(trail_->MutableConflict()) = selectors_;
     return false;
   }
 
-  literal_reason_.clear();
-  integer_reason_.clear();
-  for (const Literal l : enforcements_) {
-    literal_reason_.push_back(l.Negated());
-  }
-  for (int i = 0; i < exprs_.size(); ++i) {
-    // If the level zero bounds is good enough, no reason needed.
-    if (integer_trail_->LevelZeroLowerBound(exprs_[i]) >= target_min) {
-      continue;
-    }
-    if (trail_->Assignment().LiteralIsFalse(selectors_[i])) {
-      literal_reason_.push_back(selectors_[i]);
-    } else {
-      if (!exprs_[i].IsConstant()) {
-        integer_reason_.push_back(exprs_[i].GreaterOrEqual(target_min));
-      }
-    }
-  }
-  return integer_trail_->Enqueue(
-      IntegerLiteral::GreaterOrEqual(target_var_, target_min), literal_reason_,
-      integer_reason_);
+  // Note that we use id/propagation_slack for other purpose.
+  return integer_trail_->EnqueueWithLazyReason(
+      IntegerLiteral::GreaterOrEqual(target_var_, target_min),
+      /*id=*/first_non_false, /*propagation_slack=*/target_min, this);
 }
 
 void GreaterThanAtLeastOneOfPropagator::RegisterWith(

@@ -1,4 +1,4 @@
-// Copyright 2010-2024 Google LLC
+// Copyright 2010-2025 Google LLC
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -156,7 +156,7 @@ MPSolver::ResultStatus PdlpInterface::Solve(const MPSolverParameters& param) {
                 << ProtobufDebugString(parameters_);
   }
   absl::StatusOr<MPSolutionResponse> response = PdlpSolveProto(
-      request, /*relax_integer_variables=*/true, &interrupt_solver_);
+      std::move(request), /*relax_integer_variables=*/true, &interrupt_solver_);
 
   if (!response.ok()) {
     LOG(ERROR) << "Unexpected error solving with PDLP: " << response.status();
