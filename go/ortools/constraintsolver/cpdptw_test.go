@@ -66,7 +66,7 @@ func TestConstraintSolver_CPDPTW_CheckValidSolution(t *testing.T) {
 	}
 
 	solution := routing.ReadAssignmentFromRoutes(routes, false)
-	if routing.GetStatus() != RoutingModelROUTING_SUCCESS {
+	if routing.GetStatus() != RoutingSearchStatus_ROUTING_SUCCESS {
 		t.Errorf("Expected success, got %v", routing.GetStatus())
 		return
 	}
@@ -98,7 +98,7 @@ func TestConstraintSolver_CPDPTW_CheckInvalidSolution(t *testing.T) {
 	}
 
 	_ = routing.ReadAssignmentFromRoutes(routes, false)
-	if routing.GetStatus() != RoutingModelROUTING_FAIL {
+	if routing.GetStatus() != RoutingSearchStatus_ROUTING_FAIL {
 		t.Errorf("Expected fail, got %v", routing.GetStatus())
 		return
 	}
@@ -303,7 +303,7 @@ func printSolutionCPDPTW(t *testing.T, data DataModelCPDPTW, manager RoutingInde
 			dropped += fmt.Sprintf(" %v", manager.IndexToNode(n))
 		}
 	}
-	t.Logf(dropped)
+	t.Log(dropped)
 	t.Log()
 
 	// Display routes

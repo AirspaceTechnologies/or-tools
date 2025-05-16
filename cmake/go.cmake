@@ -18,6 +18,7 @@ include(UseSWIG)
 if(UNIX AND NOT APPLE)
   list(APPEND CMAKE_SWIG_FLAGS "-DSWIGWORDSIZE64")
 endif()
+list(APPEND CMAKE_SWIG_FLAGS "-DOR_DLL=")
 
 # Set SWIG flags for Go
 list(APPEND CMAKE_SWIG_FLAGS "-c++" "-cgo" "-intgosize" "64")

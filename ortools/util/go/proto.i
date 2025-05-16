@@ -97,3 +97,20 @@
   $result = slice;
 }
 %enddef // end PROTO2_RETURN
+
+// SWIG Macro for mapping protocol message enum type.
+// @param CppEnumProto the C++ protocol message enum type
+// @param GoEnumProto the corresponding Go protocol message enum type
+%define PROTO_ENUM_RETURN(CppEnumProto, GoEnumProto)
+%typemap(ctype)  CppEnumProto "int"
+%typemap(imtype) CppEnumProto "int"
+%typemap(gotype) CppEnumProto "GoEnumProto"
+
+// From CppEnumProto to ctype (in wrap.cxx code)
+%typemap(out) CppEnumProto %{ $result = $1; %}
+
+// From imtype to gotype (in .go code)
+%typemap(goout) CppEnumProto {
+  $result = GoEnumProto($1)
+}
+%enddef // end PROTO_ENUM_RETURN
