@@ -24,6 +24,10 @@ list(APPEND CMAKE_SWIG_FLAGS "-DOR_DLL=")
 list(APPEND CMAKE_SWIG_FLAGS "-c++" "-cgo" "-intgosize" "64")
 
 # Find go cli
+# -race requires a 48-bit VMA on arm64; QEMU user emulation only provides 47,
+# so cross-arch delivery builds disable it (tests still run un-instrumented)
+option(GO_TEST_RACE "Run Go example tests with -race" ON)
+
 find_program(GO_EXECUTABLE NAMES go)
 if(NOT GO_EXECUTABLE)
   message(FATAL_ERROR "Check for go Program: not found")
@@ -117,6 +121,7 @@ file(GLOB_RECURSE proto_go_files RELATIVE ${PROJECT_SOURCE_DIR}
   "ortools/constraint_solver/solver_parameters.proto"
   "ortools/constraint_solver/routing_parameters.proto"
   "ortools/constraint_solver/routing_enums.proto"
+  "ortools/constraint_solver/routing_heuristic_parameters.proto"
   "ortools/constraint_solver/routing_ils.proto"
   "ortools/sat/sat_parameters.proto"
   "ortools/util/optional_boolean.proto"
@@ -214,7 +219,7 @@ function(add_go_example FILE_NAME)
   endif()
   add_custom_command(
     OUTPUT ${GO_EXAMPLE_DIR}/${EXAMPLE_NAME}.run
-    COMMAND ${CGO_ENVS} ${GO_EXECUTABLE} test -exec "env ${LD_ENVS}" ./... -run /${EXAMPLE_NAME}/i -race -v
+    COMMAND ${CGO_ENVS} ${GO_EXECUTABLE} test -exec "env ${LD_ENVS}" ./... -run /${EXAMPLE_NAME}/i $<$<BOOL:${GO_TEST_RACE}>:-race> -v
     DEPENDS
       ${GO_EXAMPLE_DIR}/${EXAMPLE_NAME}.go
       go_package
