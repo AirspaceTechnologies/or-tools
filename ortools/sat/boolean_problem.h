@@ -11,14 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_SAT_BOOLEAN_PROBLEM_H_
-#define OR_TOOLS_SAT_BOOLEAN_PROBLEM_H_
+#ifndef ORTOOLS_SAT_BOOLEAN_PROBLEM_H_
+#define ORTOOLS_SAT_BOOLEAN_PROBLEM_H_
 
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/types/span.h"
 #include "ortools/algorithms/sparse_permutation.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/sat/boolean_problem.pb.h"
@@ -106,7 +107,7 @@ void StoreAssignment(const VariablesAssignment& assignment,
 
 // Constructs a sub-problem formed by the constraints with given indices.
 void ExtractSubproblem(const LinearBooleanProblem& problem,
-                       const std::vector<int>& constraint_indices,
+                       absl::Span<const int> constraint_indices,
                        LinearBooleanProblem* subproblem);
 
 // Modifies the given LinearBooleanProblem so that all the literals appearing
@@ -142,4 +143,4 @@ void ProbeAndSimplifyProblem(SatPostsolver* postsolver,
 }  // namespace sat
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_SAT_BOOLEAN_PROBLEM_H_
+#endif  // ORTOOLS_SAT_BOOLEAN_PROBLEM_H_

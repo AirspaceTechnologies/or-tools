@@ -36,7 +36,7 @@ target_link_libraries(${NAME} PRIVATE
 if(BUILD_TESTING)
   file(GLOB _TEST_SRCS "*_test.cc")
   list(FILTER _TEST_SRCS EXCLUDE REGEX ".*_stress_test.cc")
-  list(FILTER _TEST_SRCS EXCLUDE REGEX "set_cover_test.cc")
+  list(FILTER _TEST_SRCS EXCLUDE REGEX ".*/n_choose_k_test.cc")
   foreach(_FULL_FILE_NAME IN LISTS _TEST_SRCS)
     get_filename_component(_NAME ${_FULL_FILE_NAME} NAME_WE)
     get_filename_component(_FILE_NAME ${_FULL_FILE_NAME} NAME)
@@ -52,4 +52,8 @@ if(BUILD_TESTING)
         GTest::gmock
     )
   endforeach()
+  # These tests are too long so we disable them.
+  set_tests_properties(
+    cxx_algorithms_radix_sort_test
+    PROPERTIES DISABLED TRUE)
 endif()

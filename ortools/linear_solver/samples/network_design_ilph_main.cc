@@ -11,28 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "absl/base/log_severity.h"
 #include "absl/flags/flag.h"
 #include "absl/log/check.h"
+#include "absl/log/globals.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
 #include "ortools/base/commandlineflags.h"
 #include "ortools/base/init_google.h"
-#include "ortools/base/logging.h"
 #include "ortools/linear_solver/linear_solver.h"
 #include "ortools/linear_solver/samples/network_design_ilph.h"
 #include "ortools/routing/parsers/capacity_planning.pb.h"
 #include "ortools/routing/parsers/dow_parser.h"
 
-ABSL_FLAG(std::string, input, "", "File path of the problem.");
+DEFINE_string(input, "", "File path of the problem.");
 
 using operations_research::MPSolver;
 
 int main(int argc, char* argv[]) {
   InitGoogle(argv[0], &argc, &argv, true);
-  operations_research::CapacityPlanningInstance request;
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
+  operations_research::routing::CapacityPlanningInstance request;
   operations_research::CapacityPlanningProblem problem;
-  ::absl::Status status =
-      operations_research::ReadFile(absl::GetFlag(FLAGS_input), &request);
+  ::absl::Status status = operations_research::routing::ReadFile(
+      absl::GetFlag(FLAGS_input), &request);
   CHECK_OK(status);
   LOG(INFO) << "File was read.";
   status = operations_research::Convert(request, &problem);

@@ -32,13 +32,13 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "gtest/gtest.h"
 #include "ortools/base/gmock.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/status_macros.h"
 #include "ortools/math_opt/cpp/matchers.h"
 #include "ortools/math_opt/cpp/math_opt.h"
@@ -359,6 +359,11 @@ TEST_P(LpParameterTest, IterationLimitBarrier) {
 TEST_P(LpParameterTest, IterationLimitFirstOrder) {
   if (!SupportsFirstOrder()) {
     GTEST_SKIP() << "First order methods not supported. Ignoring this test.";
+  }
+  if (GetParam().solver_type == SolverType::kXpress) {
+    // Xpress is too smart for the model just here. EVen with n=300 it solves
+    // the problem to optimality (within tolerances) in the first iteration.
+    GTEST_SKIP() << "Test skipped for Xpress since model solves too easily.";
   }
   ASSERT_OK_AND_ASSIGN(
       const SolveResult result,

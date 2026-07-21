@@ -21,8 +21,8 @@
 // integer nodes a single vector, and a function RootedTreeFromGraph(), which
 // converts the adjacency list of a an undirected tree to a RootedTree.
 
-#ifndef OR_TOOLS_GRAPH_ROOTED_TREE_H_
-#define OR_TOOLS_GRAPH_ROOTED_TREE_H_
+#ifndef ORTOOLS_GRAPH_ROOTED_TREE_H_
+#define ORTOOLS_GRAPH_ROOTED_TREE_H_
 
 #include <algorithm>
 #include <cstddef>
@@ -33,12 +33,12 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/status_builder.h"
 #include "ortools/base/status_macros.h"
 
@@ -799,4 +799,4 @@ absl::StatusOr<RootedTree<typename Graph::NodeIndex>> RootedTreeFromGraph(
 
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GRAPH_ROOTED_TREE_H_
+#endif  // ORTOOLS_GRAPH_ROOTED_TREE_H_

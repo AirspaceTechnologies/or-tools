@@ -20,19 +20,21 @@
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "ortools/base/helpers.h"
 #include "ortools/base/map_util.h"
 
 namespace operations_research {
 namespace {
-int strtoint32(const std::string& word) {
+int strtoint32(absl::string_view word) {
   int result;
   CHECK(absl::SimpleAtoi(word, &result));
   return result;
 }
 }  // namespace
 
-void ParseFileByLines(const std::string& filename,
+void ParseFileByLines(absl::string_view filename,
                       std::vector<std::string>* lines) {
   CHECK(lines != nullptr);
   std::string result;
@@ -93,7 +95,7 @@ void DomainParser::Parse() {
     }
 
     if (!domain.empty()) {
-      gtl::InsertOrUpdate(&domains_, key, domain);
+      domains_.insert_or_assign(key, domain);
     }
   }
 }
@@ -197,7 +199,7 @@ void ParametersParser::Parse() {
 }
 
 // TODO(user): Make FindComponents linear instead of quadratic.
-void FindComponents(const std::vector<FapConstraint>& constraints,
+void FindComponents(absl::Span<const FapConstraint> constraints,
                     const absl::btree_map<int, FapVariable>& variables,
                     const int maximum_variable_id,
                     absl::flat_hash_map<int, FapComponent>* components) {
@@ -215,20 +217,20 @@ void FindComponents(const std::vector<FapConstraint>& constraints,
       // Create a new one.
       FapComponent component;
       const int component_index = constraint_index;
-      gtl::InsertOrUpdate(&(component.variables), variable_id1, variable1);
-      gtl::InsertOrUpdate(&(component.variables), variable_id2, variable2);
+      (component.variables).insert_or_assign(variable_id1, variable1);
+      (component.variables).insert_or_assign(variable_id2, variable2);
       in_component[variable_id1] = component_index;
       in_component[variable_id2] = component_index;
       component.constraints.push_back(constraint);
-      gtl::InsertOrUpdate(components, component_index, component);
+      components->insert_or_assign(component_index, component);
     } else if (in_component[variable_id1] >= 0 &&
                in_component[variable_id2] < 0) {
       // If variable1 belongs to an existing component, variable2 should
       // also be included in the same component.
       const int component_index = in_component[variable_id1];
       CHECK(components->contains(component_index));
-      gtl::InsertOrUpdate(&((*components)[component_index].variables),
-                          variable_id2, variable2);
+      ((*components)[component_index].variables)
+          .insert_or_assign(variable_id2, variable2);
       in_component[variable_id2] = component_index;
       (*components)[component_index].constraints.push_back(constraint);
     } else if (in_component[variable_id1] < 0 &&
@@ -237,8 +239,8 @@ void FindComponents(const std::vector<FapConstraint>& constraints,
       // also be included in the same component.
       const int component_index = in_component[variable_id2];
       CHECK(components->contains(component_index));
-      gtl::InsertOrUpdate(&((*components)[component_index].variables),
-                          variable_id1, variable1);
+      ((*components)[component_index].variables)
+          .insert_or_assign(variable_id1, variable1);
       in_component[variable_id1] = component_index;
       (*components)[component_index].constraints.push_back(constraint);
     } else {

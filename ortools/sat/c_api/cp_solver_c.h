@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_SAT_C_API_CP_SOLVER_C_H_
-#define OR_TOOLS_SAT_C_API_CP_SOLVER_C_H_
+#ifndef ORTOOLS_SAT_C_API_CP_SOLVER_C_H_
+#define ORTOOLS_SAT_C_API_CP_SOLVER_C_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -25,12 +25,12 @@ void SolveCpModelWithParameters(const void* creq, int creq_len,
                                 const void* cparams, int cparams_len,
                                 void** cres, int* cres_len);
 
-void* SolveCpNewAtomicBool();
-void SolveCpDestroyAtomicBool(void* atomic_bool);
-void SolveCpStopSolve(void* atomic_bool);
+void* SolveCpNewEnv();
+void SolveCpDestroyEnv(void* cenv);
+void SolveCpStopSearch(void* cenv);
 // Allows for interruptible solves. Solves can be interrupted by calling
-// `SolveCpStopSolve` with the `limit_reached` atomic Boolean.
-void SolveCpInterruptible(void* limit_reached, const void* creq, int creq_len,
+// `SolveCpStopSolve` with the `cenv` argument.
+void SolveCpInterruptible(void* cenv, const void* creq, int creq_len,
                           const void* cparams, int cparams_len, void** cres,
                           int* cres_len);
 
@@ -38,4 +38,4 @@ void SolveCpInterruptible(void* limit_reached, const void* creq, int creq_len,
 }  // extern "C"
 #endif
 
-#endif  // OR_TOOLS_SAT_C_API_CP_SOLVER_C_H_
+#endif  // ORTOOLS_SAT_C_API_CP_SOLVER_C_H_

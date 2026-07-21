@@ -14,13 +14,11 @@
 // IWYU pragma: private, include "ortools/math_opt/cpp/math_opt.h"
 // IWYU pragma: friend "ortools/math_opt/cpp/.*"
 
-#ifndef OR_TOOLS_MATH_OPT_CPP_BASIS_STATUS_H_
-#define OR_TOOLS_MATH_OPT_CPP_BASIS_STATUS_H_
+#ifndef ORTOOLS_MATH_OPT_CPP_BASIS_STATUS_H_
+#define ORTOOLS_MATH_OPT_CPP_BASIS_STATUS_H_
 
 #include <cstdint>
-#include <optional>
 
-#include "absl/types/span.h"
 #include "ortools/math_opt/cpp/enums.h"  // IWYU pragma: export
 #include "ortools/math_opt/solution.pb.h"
 
@@ -48,4 +46,4 @@ MATH_OPT_DEFINE_ENUM(BasisStatus, BASIS_STATUS_UNSPECIFIED);
 
 }  // namespace operations_research::math_opt
 
-#endif  // OR_TOOLS_MATH_OPT_CPP_BASIS_STATUS_H_
+#endif  // ORTOOLS_MATH_OPT_CPP_BASIS_STATUS_H_

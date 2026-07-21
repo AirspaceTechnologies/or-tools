@@ -14,8 +14,8 @@
 // IWYU pragma: private, include "ortools/math_opt/cpp/math_opt.h"
 // IWYU pragma: friend "ortools/math_opt/cpp/.*"
 
-#ifndef OR_TOOLS_MATH_OPT_CPP_MAP_FILTER_H_
-#define OR_TOOLS_MATH_OPT_CPP_MAP_FILTER_H_
+#ifndef ORTOOLS_MATH_OPT_CPP_MAP_FILTER_H_
+#define ORTOOLS_MATH_OPT_CPP_MAP_FILTER_H_
 
 #include <initializer_list>
 #include <optional>
@@ -100,7 +100,7 @@ struct MapFilter {
   // Returns a failure if the keys don't belong to the input expected_storage
   // (which must not be nullptr).
   inline absl::Status CheckModelStorage(
-      const ModelStorage* expected_storage) const;
+      ModelStorageCPtr expected_storage) const;
 
   // Returns the proto corresponding to this filter.
   //
@@ -192,7 +192,7 @@ MapFilter<KeyType> MakeKeepKeysFilter(std::initializer_list<KeyType> keys) {
 
 template <typename KeyType>
 absl::Status MapFilter<KeyType>::CheckModelStorage(
-    const ModelStorage* expected_storage) const {
+    const ModelStorageCPtr expected_storage) const {
   if (!filtered_keys.has_value()) {
     return absl::OkStatus();
   }
@@ -223,4 +223,4 @@ SparseVectorFilterProto MapFilter<KeyType>::Proto() const {
 
 }  // namespace operations_research::math_opt
 
-#endif  // OR_TOOLS_MATH_OPT_CPP_MAP_FILTER_H_
+#endif  // ORTOOLS_MATH_OPT_CPP_MAP_FILTER_H_

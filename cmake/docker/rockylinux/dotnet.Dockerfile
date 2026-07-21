@@ -4,8 +4,7 @@ FROM ortools/cmake:rockylinux_swig AS env
 # see: https://learn.microsoft.com/en-us/dotnet/core/install/linux-scripted-manual#scripted-install
 RUN wget -q "https://dot.net/v1/dotnet-install.sh" \
 && chmod a+x dotnet-install.sh \
-&& ./dotnet-install.sh -c 3.1 -i /usr/local/bin \
-&& ./dotnet-install.sh -c 6.0 -i /usr/local/bin
+&& ./dotnet-install.sh -c 8.0 -i /usr/local/bin
 # Trigger first run experience by running arbitrary cmd
 RUN dotnet --info
 
@@ -15,9 +14,14 @@ WORKDIR /home/project
 COPY . .
 RUN sed -i 's/\(<SignAssembly>\).*\(<\/SignAssembly>\)/\1false\2/' ortools/dotnet/Google.OrTools*.csproj.in
 
+ARG CMAKE_BUILD_PARALLEL_LEVEL
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL:-4}
+
 FROM devel AS build
 RUN cmake -version
-RUN cmake -S. -Bbuild -DBUILD_DOTNET=ON -DBUILD_CXX_SAMPLES=OFF -DBUILD_CXX_EXAMPLES=OFF
+RUN cmake -S. -Bbuild -DBUILD_DOTNET=ON \
+-DBUILD_CXX_SAMPLES=OFF -DBUILD_CXX_EXAMPLES=OFF \
+-DBUILD_DOTNET_EXAMPLES=OFF
 RUN cmake --build build --target all -v
 RUN cmake --build build --target install -v
 

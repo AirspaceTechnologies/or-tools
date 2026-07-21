@@ -28,23 +28,29 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <random>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
 #include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/globals.h"
+#include "absl/log/log.h"
 #include "absl/random/uniform_int_distribution.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 #include "ortools/base/init_google.h"
-#include "ortools/base/logging.h"
 #include "ortools/graph/graph.h"
 #include "ortools/graph/shortest_paths.h"
 #include "ortools/sat/cp_model.h"
 #include "ortools/sat/model.h"
+#include "ortools/util/sorted_interval_list.h"
 #include "ortools/util/time_limit.h"
 
 // ----- Data Generator -----
@@ -371,9 +377,11 @@ class NetworkRoutingSolver {
     CpModelBuilder cp_model;
     std::vector<IntVar> arc_vars;
     std::vector<IntVar> node_vars;
+    node_vars.reserve(max_length);
     for (int i = 0; i < max_length; ++i) {
       node_vars.push_back(cp_model.NewIntVar(Domain(0, num_nodes() - 1)));
     }
+    arc_vars.reserve(max_length - 1);
     for (int i = 0; i < max_length - 1; ++i) {
       arc_vars.push_back(cp_model.NewIntVar(Domain(-1, count_arcs() - 1)));
     }
@@ -397,9 +405,6 @@ class NetworkRoutingSolver {
     cp_model.AddAllDifferent(node_vars);
 
     Model model;
-    // Create an atomic Boolean that will be periodically checked by the limit.
-    std::atomic<bool> stopped(false);
-    model.GetOrCreate<TimeLimit>()->RegisterExternalBooleanAsLimit(&stopped);
 
     model.Add(NewFeasibleSolutionObserver([&](const CpSolverResponse& r) {
       const int path_id = all_paths_[demand_index].size();
@@ -409,7 +414,7 @@ class NetworkRoutingSolver {
         all_paths_[demand_index].back().insert(arc);
       }
       if (all_paths_[demand_index].size() >= max_paths) {
-        stopped = true;
+        StopSearch(&model);
       }
     }));
 
@@ -673,7 +678,7 @@ class NetworkRoutingSolver {
 }  // namespace operations_research
 
 int main(int argc, char** argv) {
-  absl::SetFlag(&FLAGS_stderrthreshold, 0);
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
   InitGoogle(argv[0], &argc, &argv, true);
 
   operations_research::sat::NetworkRoutingData data;

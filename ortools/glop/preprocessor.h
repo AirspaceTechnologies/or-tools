@@ -11,15 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//
 // This file contains the presolving code for a LinearProgram.
 //
 // A classical reference is:
 // E. D. Andersen, K. D. Andersen, "Presolving in linear programming.",
 // Mathematical Programming 71 (1995) 221-245.
 
-#ifndef OR_TOOLS_GLOP_PREPROCESSOR_H_
-#define OR_TOOLS_GLOP_PREPROCESSOR_H_
+#ifndef ORTOOLS_GLOP_PREPROCESSOR_H_
+#define ORTOOLS_GLOP_PREPROCESSOR_H_
 
 #include <deque>
 #include <memory>
@@ -83,13 +82,13 @@ class Preprocessor {
   // tolerance).
   bool IsSmallerWithinFeasibilityTolerance(Fractional a, Fractional b) const {
     return ::operations_research::IsSmallerWithinTolerance(
-        a, b, parameters_.solution_feasibility_tolerance());
+        a, b, Fractional(parameters_.solution_feasibility_tolerance()));
   }
   bool IsSmallerWithinPreprocessorZeroTolerance(Fractional a,
                                                 Fractional b) const {
     // TODO(user): use an absolute tolerance here to be even more defensive?
     return ::operations_research::IsSmallerWithinTolerance(
-        a, b, parameters_.preprocessor_zero_tolerance());
+        a, b, Fractional(parameters_.preprocessor_zero_tolerance()));
   }
 
   ProblemStatus status_;
@@ -1064,4 +1063,4 @@ class AddSlackVariablesPreprocessor final : public Preprocessor {
 }  // namespace glop
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GLOP_PREPROCESSOR_H_
+#endif  // ORTOOLS_GLOP_PREPROCESSOR_H_

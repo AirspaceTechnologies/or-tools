@@ -15,6 +15,15 @@
 
 #include "ortools/linear_solver/wrappers/model_builder_helper.h"
 
+#include <Python.h>
+
+#if PY_VERSION_HEX >= 0x030E00A7 && !defined(PYPY_VERSION)
+#define Py_BUILD_CORE
+#include "internal/pycore_frame.h"
+#include "internal/pycore_interpframe.h"
+#undef Py_BUILD_CORE
+#endif
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -300,6 +309,53 @@ std::shared_ptr<LinearExpr> WeightedSumArguments(
   }
 }
 
+#if PY_VERSION_HEX >= 0x030E00A7 && !defined(PYPY_VERSION)
+bool was_optimized_in_function_call(PyObject* op) {
+  PyFrameObject* frame = PyEval_GetFrame();
+  if (frame == NULL) {
+    return false;
+  }
+  _PyInterpreterFrame* f = frame->f_frame;
+  _PyStackRef* base = _PyFrame_Stackbase(f);
+  _PyStackRef* stackpointer = f->stackpointer;
+
+  while (stackpointer > base) {
+    stackpointer--;
+    if (op == PyStackRef_AsPyObjectBorrow(*stackpointer)) {
+      // We want detect if the object is a temporary and borrowed. If so, it
+      // should be only referenced once in the stack, but it should not be safe.
+      return !PyStackRef_IsHeapSafe(*stackpointer);
+    }
+  }
+  return false;
+}
+
+bool IsOnwedExclusivelyThroughPyBind11(PyObject* op) {
+#if !defined(Py_GIL_DISABLED)
+  return Py_REFCNT(op) == 3;
+#else
+  // NOTE: the entire ob_ref_shared field must be zero, including flags, to
+  // ensure that other threads cannot concurrently create new references to
+  // this object.
+  return (_Py_IsOwnedByCurrentThread(op) &&
+          _Py_atomic_load_uint32_relaxed(&op->ob_ref_local) == 3 &&
+          _Py_atomic_load_ssize_relaxed(&op->ob_ref_shared) == 0);
+#endif
+}
+
+template <class T>
+bool IsFree(std::shared_ptr<T> expr) {
+  PyObject* op = py::cast(expr).ptr();
+  return IsOnwedExclusivelyThroughPyBind11(op) &&
+         !was_optimized_in_function_call(op);
+}
+#else
+template <class T>
+bool IsFree(std::shared_ptr<T> expr) {
+  return Py_REFCNT(py::cast(expr).ptr()) == 4;
+}
+#endif
+
 PYBIND11_MODULE(model_builder_helper, m) {
   pybind11_protobuf::ImportNativeProtoCasters();
 
@@ -434,72 +490,78 @@ PYBIND11_MODULE(model_builder_helper, m) {
       .def(py::init<std::vector<std::shared_ptr<LinearExpr>>, double>())
       .def(
           "__add__",
-          [](py::object self,
+          [](std::shared_ptr<SumArray> expr,
              std::shared_ptr<LinearExpr> other) -> std::shared_ptr<LinearExpr> {
-            const int num_uses = Py_REFCNT(self.ptr());
-            std::shared_ptr<SumArray> expr =
-                self.cast<std::shared_ptr<SumArray>>();
-            if (num_uses == 4) {
-              expr->AddInPlace(other);
-              return expr;
-            }
-            return expr->Add(other);
+            return IsFree(expr) ? expr->AddInPlace(other) : expr->Add(other);
           },
           py::arg("other").none(false),
           "Returns the sum of `self` and `other`.")
       .def(
           "__add__",
-          [](py::object self, double cst) -> std::shared_ptr<LinearExpr> {
-            const int num_uses = Py_REFCNT(self.ptr());
-            std::shared_ptr<SumArray> expr =
-                self.cast<std::shared_ptr<SumArray>>();
-            if (num_uses == 4) {
-              expr->AddFloatInPlace(cst);
-              return expr;
-            }
-            return expr->AddFloat(cst);
+          [](std::shared_ptr<SumArray> expr,
+             double cst) -> std::shared_ptr<LinearExpr> {
+            return IsFree(expr) ? expr->AddFloatInPlace(cst)
+                                : expr->AddFloat(cst);
           },
           py::arg("cst"), "Returns `self` + `cst`.")
-      .def("__radd__", &LinearExpr::Add, py::arg("other").none(false),
-           "Returns `self` + `other`.")
       .def(
           "__radd__",
-          [](py::object self, double cst) -> std::shared_ptr<LinearExpr> {
-            const int num_uses = Py_REFCNT(self.ptr());
-            std::shared_ptr<SumArray> expr =
-                self.cast<std::shared_ptr<SumArray>>();
-            if (num_uses == 4) {
-              expr->AddFloatInPlace(cst);
-              return expr;
-            }
-            return expr->AddFloat(cst);
+          [](std::shared_ptr<SumArray> expr,
+             std::shared_ptr<LinearExpr> other) -> std::shared_ptr<LinearExpr> {
+            return IsFree(expr) ? expr->AddInPlace(other) : expr->Add(other);
+          },
+          py::arg("cst"), "Returns `self` + `cst`.")
+      .def(
+          "__radd__",
+          [](std::shared_ptr<SumArray> expr,
+             double cst) -> std::shared_ptr<LinearExpr> {
+            return IsFree(expr) ? expr->AddFloatInPlace(cst)
+                                : expr->AddFloat(cst);
+          },
+          py::arg("cst"), "Returns `self` + `cst`.")
+      .def(
+          "__iadd__",
+          [](std::shared_ptr<SumArray> expr,
+             std::shared_ptr<LinearExpr> other) -> std::shared_ptr<LinearExpr> {
+            return expr->AddInPlace(other);
+          },
+          py::arg("other").none(false),
+          "Returns the sum of `self` and `other`.")
+      .def(
+          "__iadd__",
+          [](std::shared_ptr<SumArray> expr,
+             double cst) -> std::shared_ptr<LinearExpr> {
+            return expr->AddFloatInPlace(cst);
           },
           py::arg("cst"), "Returns `self` + `cst`.")
       .def(
           "__sub__",
-          [](py::object self,
+          [](std::shared_ptr<SumArray> expr,
              std::shared_ptr<LinearExpr> other) -> std::shared_ptr<LinearExpr> {
-            const int num_uses = Py_REFCNT(self.ptr());
-            std::shared_ptr<SumArray> expr =
-                self.cast<std::shared_ptr<SumArray>>();
-            if (num_uses == 4) {
-              expr->AddInPlace(other->Neg());
-              return expr;
-            }
-            return expr->Sub(other);
+            return IsFree(expr) ? expr->AddInPlace(other->Neg())
+                                : expr->Sub(other);
           },
           py::arg("other").none(false), "Returns `self` - `other`.")
       .def(
           "__sub__",
-          [](py::object self, double cst) -> std::shared_ptr<LinearExpr> {
-            const int num_uses = Py_REFCNT(self.ptr());
-            std::shared_ptr<SumArray> expr =
-                self.cast<std::shared_ptr<SumArray>>();
-            if (num_uses == 4) {
-              expr->AddFloatInPlace(-cst);
-              return expr;
-            }
-            return expr->SubFloat(cst);
+          [](std::shared_ptr<SumArray> expr,
+             double cst) -> std::shared_ptr<LinearExpr> {
+            return IsFree(expr) ? expr->AddFloatInPlace(-cst)
+                                : expr->SubFloat(cst);
+          },
+          py::arg("cst"), "Returns `self` - `cst`.")
+      .def(
+          "__isub__",
+          [](std::shared_ptr<SumArray> expr,
+             std::shared_ptr<LinearExpr> other) -> std::shared_ptr<LinearExpr> {
+            return expr->AddInPlace(other->Neg());
+          },
+          py::arg("other").none(false), "Returns `self` - `other`.")
+      .def(
+          "__isub__",
+          [](std::shared_ptr<SumArray> expr,
+             double cst) -> std::shared_ptr<LinearExpr> {
+            return expr->AddFloatInPlace(-cst);
           },
           py::arg("cst"), "Returns `self` - `cst`.")
       .def_property_readonly(
@@ -511,25 +573,6 @@ PYBIND11_MODULE(model_builder_helper, m) {
   py::class_<AffineExpr, std::shared_ptr<AffineExpr>, LinearExpr>(m,
                                                                   "AffineExpr")
       .def(py::init<std::shared_ptr<LinearExpr>, double, double>())
-      .def("__add__", &AffineExpr::Add, py::arg("other").none(false),
-           "Returns `self` + `other`.")
-      .def("__add__", &AffineExpr::AddFloat, py::arg("cst"),
-           "Returns `self` + `cst`.")
-      .def("__radd__", &AffineExpr::Add, py::arg("other").none(false),
-           "Returns `self` + `other`.")
-      .def("__radd__", &AffineExpr::AddFloat, py::arg("cst"),
-           "Returns `self` + `cst`.")
-      .def("__sub__", &AffineExpr::Sub, py::arg("other").none(false),
-           "Returns `self` - `other`.")
-      .def("__sub__", &AffineExpr::SubFloat, py::arg("cst"),
-           "Returns `self` - `cst`.")
-      .def("__rsub__", &AffineExpr::RSubFloat, py::arg("cst"),
-           "Returns `cst` - `self`.")
-      .def("__mul__", &AffineExpr::MulFloat, py::arg("cst"),
-           "Returns `self` * `cst`.")
-      .def("__rmul__", &AffineExpr::MulFloat, py::arg("cst"),
-           "Returns `self` * `cst`.")
-      .def("__neg__", &AffineExpr::Neg, "Returns -`self`.")
       .def_property_readonly("expression", &AffineExpr ::expression)
       .def_property_readonly("coefficient", &AffineExpr::coefficient)
       .def_property_readonly("offset", &AffineExpr::offset);
@@ -583,8 +626,7 @@ PYBIND11_MODULE(model_builder_helper, m) {
                         absl::StrCat("Evaluating a BoundedLinearExpression '",
                                      self.ToString(),
                                      "'instance as a Boolean is "
-                                     "not supported.")
-                            .c_str());
+                                     "not supported."));
              return false;
            })
       .def("__str__", &BoundedLinearExpression::ToString)
@@ -619,19 +661,10 @@ PYBIND11_MODULE(model_builder_helper, m) {
            py::arg("mps_string"))
       .def("import_from_mps_file", &ModelBuilderHelper::ImportFromMpsFile,
            py::arg("mps_file"))
-#if defined(USE_LP_PARSER)
       .def("import_from_lp_string", &ModelBuilderHelper::ImportFromLpString,
            py::arg("lp_string"))
       .def("import_from_lp_file", &ModelBuilderHelper::ImportFromLpFile,
            py::arg("lp_file"))
-#else
-            .def("import_from_lp_string", [](const std::string& lp_string) {
-              LOG(INFO) << "Parsing LP string is not compiled in";
-            })
-            .def("import_from_lp_file", [](const std::string& lp_file) {
-              LOG(INFO) << "Parsing LP file is not compiled in";
-            })
-#endif
       .def(
           "fill_model_from_sparse_data",
           [](ModelBuilderHelper* helper,

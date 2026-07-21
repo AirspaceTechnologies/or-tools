@@ -11,14 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_SAT_UTIL_H_
-#define OR_TOOLS_SAT_UTIL_H_
+#ifndef ORTOOLS_SAT_UTIL_H_
+#define ORTOOLS_SAT_UTIL_H_
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <string>
@@ -26,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/container/btree_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log_streamer.h"
@@ -46,6 +48,14 @@
 
 namespace operations_research {
 namespace sat {
+
+// Removes all elements for which `pred` returns true.
+// This implementation provides std::erase_if for C++17.
+template <class Container, class Pred>
+void OpenSourceEraseIf(Container& c, Pred pred) {
+  auto it = std::remove_if(c.begin(), c.end(), pred);
+  c.erase(it, c.end());
+}
 
 // A simple class with always IdentityMap[t] == t.
 // This is to avoid allocating vector with std::iota() in some Apis.
@@ -100,7 +110,8 @@ class CompactVectorVector {
   // We only check keys.size(), so this can be used with IdentityMap() as
   // second argument.
   template <typename Keys, typename Values>
-  void ResetFromFlatMapping(Keys keys, Values values);
+  void ResetFromFlatMapping(Keys keys, Values values,
+                            int minimum_num_nodes = 0);
 
   // Same as above but for any collections of std::pair<K, V>, or, more
   // generally, any iterable collection of objects that have a `first` and a
@@ -119,10 +130,20 @@ class CompactVectorVector {
   void ResetFromTranspose(const CompactVectorVector<V, K>& other,
                           int min_transpose_size = 0);
 
+  // Same as above, but more generic:
+  // - `other` can be anything that accepts `other.size()` and `other[i]`, with
+  //   `other[i]` returning something we can iterate over in a for-loop.
+  // - The mapper type `ValueMapper` is a functor that takes an element that we
+  //   get by iterating over `other[i]` and returns a value of type `K`.
+  template <typename ValueMapper, typename Container>
+  void ResetFromTransposeMap(const Container& other,
+                             int min_transpose_size = 0);
+
   // Append a new entry.
   // Returns the previous size() as this is convenient for how we use it.
   int Add(absl::Span<const V> values);
   void AppendToLastVector(const V& value);
+  void AppendToLastVector(absl::Span<const V> values);
 
   // Hacky: same as Add() but for sat::Literal or any type from which we can get
   // a value type V via L.Index().value().
@@ -147,6 +168,9 @@ class CompactVectorVector {
   // This will crash if there are more values than before.
   void ReplaceValuesBySmallerSet(K key, absl::Span<const V> values);
 
+  // Shrinks the inner vector size of the given key.
+  void Shrink(K key, int new_size);
+
   // Interface so this can be used as an output of
   // FindStronglyConnectedComponents().
   void emplace_back(V const* begin, V const* end) {
@@ -162,6 +186,116 @@ class CompactVectorVector {
   std::vector<V> buffer_;
 };
 
+// Similar to a CompactVectorVector<K, V> but allow to merge rows.
+// This however lead to a slower [] operator.
+template <typename K = int, typename V = int>
+class MergeableOccurrenceList {
+ public:
+  MergeableOccurrenceList() = default;
+
+  template <typename ValueMapper, typename Container>
+  void ResetFromTransposeMap(const Container& input,
+                             int min_transpose_size = 0) {
+    rows_.template ResetFromTransposeMap<ValueMapper>(input,
+                                                      min_transpose_size);
+    next_.assign(rows_.size(), K(-1));
+    marked_.ClearAndResize(V(input.size()));
+    merged_.ClearAndResize(K(rows_.size()));
+  }
+
+  int size() const { return rows_.size(); }
+
+  // Any value here will never appear in the result of operator[] anymore.
+  void RemoveFromFutureOutput(V value) { marked_.Set(value); }
+
+  // Returns a "set" of values V for the given key.
+  // There will never be duplicates.
+  //
+  // Warning: the span is only valid until the next call to [].
+  // This is not const because it lazily merges lists.
+  absl::Span<const V> operator[](K key) {
+    if (key >= rows_.size()) return {};
+    CHECK(!merged_[key]);
+
+    tmp_result_.clear();
+    K previous(-1);
+    while (key >= 0) {
+      int new_size = 0;
+      absl::Span<V> data = rows_[key];
+      for (const V v : data) {
+        if (marked_[v]) continue;
+        marked_.Set(v);
+        tmp_result_.push_back(v);
+        data[new_size++] = v;
+      }
+      rows_.Shrink(key, new_size);
+
+      if (new_size == 0 && previous >= 0) {
+        // Bypass on next scan and keep previous.
+        next_[InternalKey(previous)] = next_[InternalKey(key)];
+      } else {
+        previous = key;
+      }
+
+      // Follow the linked list.
+      key = next_[InternalKey(key)];
+    }
+
+    // Sparse clear marked.
+    for (const V v : tmp_result_) marked_.Clear(v);
+    return tmp_result_;
+  }
+
+  // Merge this[key] into this[representative].
+  // If key == representative, this does nothing.
+  //
+  // And otherwise key should never be accessed anymore.
+  void MergeInto(K to_merge, K representative) {
+    CHECK(!merged_[to_merge]);
+    DCHECK_GE(to_merge, 0);
+    DCHECK_GE(representative, 0);
+    DCHECK_LT(to_merge, rows_.size());
+    DCHECK_LT(representative, rows_.size());
+    if (to_merge == representative) return;
+    merged_.Set(to_merge);
+
+    // Find the end of the representative list to happen to_merge there.
+    //
+    // TODO(user): this might be slow ? It can be made O(1) if we keep the index
+    // of the end of each linked list. But in practice we currently loop over
+    // the list right after, so the complexity is dominated anyway.
+    K last_list = representative;
+    while (next_[InternalKey(last_list)] >= 0) {
+      last_list = next_[InternalKey(last_list)];
+      DCHECK_NE(last_list, to_merge);
+    }
+    next_[InternalKey(last_list)] = to_merge;
+  }
+
+  void ClearList(K key) {
+    next_[InternalKey(key)] = -1;
+    rows_.Shrink(key, 0);
+  }
+
+ private:
+  // Convert int and StrongInt to normal int.
+  int InternalKey(K key) const;
+
+  // Used by operator[] who return a Span<> into tmp_result_.
+  // The bitset is used to remove duplicates when merging lists.
+  std::vector<V> tmp_result_;
+  Bitset64<V> marked_;
+  Bitset64<K> merged_;
+
+  // Each "row" contains a set of values (we lazily remove duplicate).
+  CompactVectorVector<K, V> rows_;
+
+  // Disjoint linked lists of rows.
+  // Basically we starts at rows_[key] and continue at rows_[next_[key]].
+  // -1 means no next.
+  std::vector<K> next_;
+};
+
 // We often have a vector with fixed capacity reserved outside the hot loops.
 // Using this class instead save the capacity but most importantly link a lot
 // less code for the push_back() calls which allow more inlining.
@@ -170,6 +304,13 @@ class CompactVectorVector {
 template <typename T>
 class FixedCapacityVector {
  public:
+  FixedCapacityVector() = default;
+  explicit FixedCapacityVector(absl::Span<const T> span) {
+    size_ = span.size();
+    data_.reset(new T[size_]);
+    std::copy(span.begin(), span.end(), data_.get());
+  }
+
   void ClearAndReserve(size_t size) {
     size_ = 0;
     data_.reset(new T[size]);
@@ -196,9 +337,6 @@ class FixedCapacityVector {
   int size_ = 0;
   std::unique_ptr<T[]> data_ = nullptr;
 };
-
-// Prints a positive number with separators for easier reading (ex: 1'348'065).
-std::string FormatCounter(int64_t num);
 
 // This is used to format our table first row entry.
 inline std::string FormatName(absl::string_view name) {
@@ -309,7 +447,7 @@ bool LinearInequalityCanBeReducedWithClosestMultiple(
 // The model "singleton" random engine used in the solver.
 //
 // In test, we usually set use_absl_random() so that the sequence is changed at
-// each invocation. This way, clients do not relly on the wrong assumption that
+// each invocation. This way, clients do not really on the wrong assumption that
 // a particular optimal solution will be returned if they are many equivalent
 // ones.
 class ModelRandomGenerator : public absl::BitGenRef {
@@ -326,6 +464,12 @@ class ModelRandomGenerator : public absl::BitGenRef {
       absl::BitGenRef::operator=(absl::BitGenRef(absl_random_));
     }
   }
+
+  explicit ModelRandomGenerator(const absl::BitGenRef& bit_gen_ref)
+      : absl::BitGenRef(deterministic_random_) {
+    absl::BitGenRef::operator=(bit_gen_ref);
+  }
+
   explicit ModelRandomGenerator(Model* model)
       : ModelRandomGenerator(*model->GetOrCreate<SatParameters>()) {}
 
@@ -382,6 +526,38 @@ int MoveOneUnprocessedLiteralLast(
     const absl::btree_set<LiteralIndex>& processed, int relevant_prefix_size,
     std::vector<Literal>* literals);
 
+// Selects k out of n such that the sum of pairwise distances is maximal.
+// distances[i * n + j] = distances[j * n + j] = distances between i and j.
+//
+// In the special case k >= n - 1, we use a faster algo.
+//
+// Otherwise, this shall only be called with small n, we CHECK_LE(n, 25).
+// Complexity is in O(2 ^ n + n_choose_k * n). Memory is in O(2 ^ n).
+//
+// In case of tie, this will choose deterministically, so one can randomize the
+// order first to get a random subset. The returned subset will always be
+// sorted.
+std::vector<int> FindMostDiverseSubset(int k, int n,
+                                       absl::Span<const int64_t> distances,
+                                       std::vector<int64_t>& buffer,
+                                       int always_pick_mask = 0);
+
+// HEURISTIC. Try to "cut" the list into roughly sqrt(size) equally sized parts.
+// We try to keep the same coefficients in the same buckets.
+// The list is assumed to be sorted.
+// Return a list of pair (start, size) for each part.
+//
+// Context: Currently when we load long linear constraint (more than 100 terms),
+// to keep the propagation and reason shorts, we always split them by adding
+// intermediate variable corresponding to the sum of a subpart. We just do that
+// in the CP-engine, not in the LP though. using sub-part with the same coeff
+// seems to help and kind of make sense.
+//
+// TODO(user): This sounds sub-optimal, we should also try to add variables for
+// common part between constraints, like what some of the presolve is doing.
+std::vector<std::pair<int, int>> HeuristicallySplitLongLinear(
+    absl::Span<const int64_t> coeffs);
+
 // Simple DP to compute the maximum reachable value of a "subset sum" under
 // a given bound (inclusive). Note that we abort as soon as the computation
 // become too important.
@@ -398,9 +574,6 @@ class MaxBoundedSubsetSum {
   // Resets to an empty set of values.
   // We look for the maximum sum <= bound.
   void Reset(int64_t bound);
-
-  // Returns the updated max if value was added to the subset-sum.
-  int64_t MaxIfAdded(int64_t candidate) const;
 
   // Add a value to the base set for which subset sums will be taken.
   void Add(int64_t value);
@@ -719,6 +892,22 @@ class TopN {
   std::vector<Element> elements_;
 };
 
+// Returns true iff subset is strictly included in superset.
+// This assumes that superset has no duplicates (otherwise it is wrong).
+inline bool IsStrictlyIncluded(Bitset64<LiteralIndex>::ConstView in_subset,
+                               int subset_size,
+                               absl::Span<const Literal> superset) {
+  if (subset_size >= superset.size()) return false;
+  int budget = superset.size() - subset_size;
+  for (const Literal l : superset) {
+    if (!in_subset[l]) {
+      --budget;
+      if (budget < 0) return false;
+    }
+  }
+  return true;
+}
+
 // ============================================================================
 // Implementation.
 // ============================================================================
@@ -756,6 +945,13 @@ inline void CompactVectorVector<K, V>::AppendToLastVector(const V& value) {
 }
 
 template <typename K, typename V>
+inline void CompactVectorVector<K, V>::AppendToLastVector(
+    absl::Span<const V> values) {
+  sizes_.back() += values.size();
+  buffer_.insert(buffer_.end(), values.begin(), values.end());
+}
+
+template <typename K, typename V>
 inline void CompactVectorVector<K, V>::ReplaceValuesBySmallerSet(
     K key, absl::Span<const V> values) {
   CHECK_LE(values.size(), sizes_[key]);
@@ -785,6 +981,13 @@ inline int CompactVectorVector<K, V>::InternalKey(K key) {
   } else {
     return key.value();
   }
+}
+
+template <typename K, typename V>
+inline void CompactVectorVector<K, V>::Shrink(K key, int new_size) {
+  const int k = InternalKey(key);
+  DCHECK_LE(new_size, sizes_[k]);
+  sizes_[k] = new_size;
 }
 
 template <typename K, typename V>
@@ -838,14 +1041,19 @@ inline bool CompactVectorVector<K, V>::empty() const {
 
 template <typename K, typename V>
 template <typename Keys, typename Values>
-inline void CompactVectorVector<K, V>::ResetFromFlatMapping(Keys keys,
-                                                            Values values) {
-  if (keys.empty()) return clear();
-
+inline void CompactVectorVector<K, V>::ResetFromFlatMapping(
+    Keys keys, Values values, int minimum_num_nodes) {
   // Compute maximum index.
-  int max_key = 0;
+  int max_key = minimum_num_nodes;
   for (const K key : keys) {
     max_key = std::max(max_key, InternalKey(key) + 1);
+  }
+
+  if (keys.empty()) {
+    clear();
+    sizes_.assign(minimum_num_nodes, 0);
+    starts_.assign(minimum_num_nodes, 0);
+    return;
   }
 
   // Compute sizes_;
@@ -919,9 +1127,11 @@ inline void CompactVectorVector<K, V>::ResetFromPairs(const Collection& pairs,
 
 // Similar to ResetFromFlatMapping().
 template <typename K, typename V>
-inline void CompactVectorVector<K, V>::ResetFromTranspose(
-    const CompactVectorVector<V, K>& other, int min_transpose_size) {
-  if (other.empty()) {
+template <typename ValueMapper, typename Container>
+void CompactVectorVector<K, V>::ResetFromTransposeMap(const Container& other,
+                                                      int min_transpose_size) {
+  ValueMapper mapper;
+  if (other.size() == 0) {
     clear();
     if (min_transpose_size > 0) {
       starts_.assign(min_transpose_size, 0);
@@ -932,17 +1142,19 @@ inline void CompactVectorVector<K, V>::ResetFromTranspose(
 
   // Compute maximum index.
   int max_key = min_transpose_size;
-  for (V v = 0; v < other.size(); ++v) {
-    for (const K k : other[v]) {
-      max_key = std::max(max_key, InternalKey(k) + 1);
+  int num_entries = 0;
+  for (V v(0); v < other.size(); ++v) {
+    num_entries += other[v].size();
+    for (const auto k : other[v]) {
+      max_key = std::max(max_key, InternalKey(mapper(k)) + 1);
     }
   }
 
   // Compute sizes_;
   sizes_.assign(max_key, 0);
-  for (V v = 0; v < other.size(); ++v) {
-    for (const K k : other[v]) {
-      sizes_[InternalKey(k)]++;
+  for (V v(0); v < other.size(); ++v) {
+    for (const auto k : other[v]) {
+      sizes_[InternalKey(mapper(k))]++;
     }
   }
 
@@ -953,10 +1165,10 @@ inline void CompactVectorVector<K, V>::ResetFromTranspose(
   }
 
   // Copy data and uses starts as temporary indices.
-  buffer_.resize(other.buffer_.size());
-  for (V v = 0; v < other.size(); ++v) {
-    for (const K k : other[v]) {
-      buffer_[starts_[InternalKey(k)]++] = v;
+  buffer_.resize(num_entries);
+  for (V v(0); v < other.size(); ++v) {
+    for (const auto k : other[v]) {
+      buffer_[starts_[InternalKey(mapper(k))]++] = v;
     }
   }
 
@@ -967,7 +1179,314 @@ inline void CompactVectorVector<K, V>::ResetFromTranspose(
   starts_[0] = 0;
 }
 
+// Similar to ResetFromFlatMapping().
+template <typename K, typename V>
+inline void CompactVectorVector<K, V>::ResetFromTranspose(
+    const CompactVectorVector<V, K>& other, int min_transpose_size) {
+  struct NoOpMapper {
+    K operator()(K k) const { return k; }
+  };
+  ResetFromTransposeMap<NoOpMapper, CompactVectorVector<V, K>>(
+      other, min_transpose_size);
+}
+
+// A class to generate all possible topological sorting of a dag.
+//
+// If the graph has no edges, it will generate all possible permutations.
+//
+// If the graph has edges, it will generate all possible permutations of the dag
+// that are a topological sorting of the graph.
+//
+// Typical usage:
+//
+//   DagTopologicalSortIterator dag_topological_sort(5);
+//
+//   dag_topological_sort.AddArc(0, 1);
+//   dag_topological_sort.AddArc(1, 2);
+//   dag_topological_sort.AddArc(3, 4);
+//
+//   for (const auto& permutation : dag_topological_sort) {
+//     // Do something with each permutation.
+//   }
+//
+// Note: to test if there are cycles, it is enough to check if at least one
+// iteration occurred in the above loop.
+//
+// Note 2: adding an arc during an iteration is not supported and the behavior
+// is undefined.
+class DagTopologicalSortIterator {
+ public:
+  DagTopologicalSortIterator() = default;
+
+  // Graph maps indices to their children. Any children must exist.
+  explicit DagTopologicalSortIterator(int size)
+      : graph_(size, std::vector<int>{}) {}
+
+  // An iterator class to generate all possible topological sorting of a dag.
+  //
+  // If the graph has no edges, it will generate all possible permutations.
+  //
+  // If the graph has edges, it will generate all possible permutations of the
+  // dag that are a topological sorting of the graph.
+  //
+  // The class maintains 5 fields:
+  //  - graph_: a vector of vectors, where graph_[i] contains the list of
+  //  elements that are adjacent to element i. This is not owned.
+  //  - size_: the size of the graph.
+  //  - missing_parent_numbers_: a vector of integers, where
+  //    missing_parent_numbers_[i] is the number of parents of element i that
+  //    are not yet in permutation_. It is always 0 except during the
+  //    execution of operator++().
+  //  - permutation_: a vector of integers, that is a topological sorting of the
+  //    graph except during the execution of operator++().
+  //  - element_original_position_: a vector of integers, where
+  //    element_original_position_[i] is the original position of element i in
+  //    the permutation_. See the algorithm below for more details.
+
+  class Iterator {
+    friend class DagTopologicalSortIterator;
+
+   public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = const std::vector<int>;
+    using difference_type = ptrdiff_t;
+    using pointer = value_type*;
+    using reference = value_type&;
+
+    Iterator& operator++();
+
+    friend bool operator==(const Iterator& a, const Iterator& b) {
+      return &a.graph_ == &b.graph_ && a.ordering_index_ == b.ordering_index_;
+    }
+
+    friend bool operator!=(const Iterator& a, const Iterator& b) {
+      return !(a == b);
+    }
+
+    reference operator*() const { return permutation_; }
+
+    pointer operator->() const { return &permutation_; }
+
+   private:
+    // End iterator.
+    explicit Iterator(const std::vector<std::vector<int>>& graph
+                          ABSL_ATTRIBUTE_LIFETIME_BOUND,
+                      bool)
+        : graph_(graph), ordering_index_(-1) {}
+
+    // Begin iterator.
+    explicit Iterator(const std::vector<std::vector<int>>& graph
+                          ABSL_ATTRIBUTE_LIFETIME_BOUND);
+
+    // Unset the element at pos.
+    void Unset(int pos);
+
+    // Set the element at pos to the element at k.
+    void Set(int pos, int k);
+
+    // Graph maps indices to their children. Children must be in [0, size_).
+    const std::vector<std::vector<int>>& graph_;
+    // Number of elements in graph_.
+    int size_;
+    // For each element in graph_, the number of parents it has that are not yet
+    // in permutation_. In particular, it is always 0 outside of operator++().
+    std::vector<int> missing_parent_numbers_;
+    // The current permutation. It is ensured to be a topological sorting of the
+    // graph outside of operator++().
+    std::vector<int> permutation_;
+    // Keeps track of the original position of the element in permutation_[i].
+    // See the comment above the class for the detailed algorithm.
+    std::vector<int> element_original_position_;
+
+    // Index of the current ordering. Used to compare iterators. It is -1 if the
+    // end has been reached.
+    int64_t ordering_index_;
+  };
+
+  Iterator begin() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return Iterator(graph_);
+  }
+  Iterator end() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return Iterator(graph_, true);
+  }
+
+  void Reset(int size) { graph_.assign(size, {}); }
+
+  // Must be called before iteration starts or between iterations.
+  void AddArc(int from, int to) {
+    DCHECK_GE(from, 0);
+    DCHECK_LT(from, graph_.size());
+    DCHECK_GE(to, 0);
+    DCHECK_LT(to, graph_.size());
+    graph_[from].push_back(to);
+  }
+
+ private:
+  // Graph maps indices to their children. Children must be in [0, size_).
+  std::vector<std::vector<int>> graph_;
+};
+
+// To describe the algorithm in operator++() and constructor(), we consider the
+// following invariant, called Invariant(pos) for a position pos in [0, size_):
+//  1. permutations_[0], ..., permutations_[pos] form a prefix of a topological
+//     ordering of the graph;
+//  2. permutations_[pos + 1], ..., permutations_.back() are all other elements
+//     that have all their parents in permutations_[0], ..., permutations_[pos],
+//     ordered lexicographically by the index of their last parent in
+//     permutations_[0], ... permutations_[pos] and then by their index in the
+//     graph;
+//  3. missing_parent_numbers_[i] is the number of parents of element i that are
+//     not in {permutations_[0], ..., permutations_[pos]}.
+//  4. element_original_position_[i] is the original position of element i of
+//     the permutation following the order described in 2. In particular,
+//     element_original_position_[i] = i for i > pos.
+// Set and Unset maintain these invariants.
+
+// Precondition: Invariant(size_ - 1) holds.
+// Postcondition: Invariant(size_ - 1) holds if the end of the iteration is not
+// reached.
+inline DagTopologicalSortIterator::Iterator&
+DagTopologicalSortIterator::Iterator::operator++() {
+  CHECK_GE(ordering_index_, 0) << "Iteration past end";
+  if (size_ == 0) {
+    // Special case: empty graph, only one topological ordering is
+    // generated.
+    ordering_index_ = -1;
+    return *this;
+  }
+
+  Unset(size_ - 1);
+  for (int pos = size_ - 2; pos >= 0; --pos) {
+    // Invariant(pos) holds.
+    // Increasing logic: once permutation_[pos] has been put back to its
+    // original position by Unset(pos), elements permutations_[pos], ...,
+    // permutations_.back() are in their original ordering, in particular in
+    // the same order as last time the iteration on permutation_[pos] occurred
+    // (according to Invariant(pos).2, these are exactly the elements that have
+    // to be tried at pos). All possibilities in permutations_[pos], ...,
+    // permutations_[element_original_position_[pos]] have been run through.
+    // The next to test is permutations_[element_original_position_[pos] + 1].
+    const int k = element_original_position_[pos] + 1;
+    Unset(pos);
+    // Invariant(pos - 1) holds.
+
+    // No more elements to iterate on at position pos. Go backwards one position
+    // to increase that one.
+    if (k == permutation_.size()) continue;
+    Set(pos, k);
+    // Invariant(pos) holds.
+    for (++pos; pos < size_; ++pos) {
+      // Invariant(pos - 1) holds.
+      // According to Invariant(pos - 1).2, if pos >= permutation_.size(), there
+      // are no more elements we can add to the permutation which means that we
+      // detected a cycle. It would be a bug as we would have detected it in
+      // the constructor.
+      CHECK_LT(pos, permutation_.size())
+          << "Unexpected cycle detected during iteration";
+      // According to Invariant(pos - 1).2, elements that can be used at pos are
+      // permutations_[pos], ..., permutations_.back(). Starts the iteration at
+      // permutations_[pos].
+      Set(pos, pos);
+      // Invariant(pos) holds.
+    }
+    // Invariant(size_ - 1) holds.
+    ++ordering_index_;
+    return *this;
+  }
+  ordering_index_ = -1;
+  return *this;
+}
+
+inline DagTopologicalSortIterator::Iterator::Iterator(
+    const std::vector<std::vector<int>>& graph)
+    : graph_(graph),
+      size_(graph.size()),
+      missing_parent_numbers_(size_, 0),
+      element_original_position_(size_, 0),
+      ordering_index_(0) {
+  if (size_ == 0) {
+    // Special case: empty graph, only one topological ordering is generated,
+    // which is the "empty" ordering.
+    return;
+  }
+
+  for (const auto& children : graph_) {
+    for (const int child : children) {
+      missing_parent_numbers_[child]++;
+    }
+  }
+
+  for (int i = 0; i < size_; ++i) {
+    if (missing_parent_numbers_[i] == 0) {
+      permutation_.push_back(i);
+    }
+  }
+  for (int pos = 0; pos < size_; ++pos) {
+    // Invariant(pos - 1) holds.
+    // According to Invariant(pos - 1).2, if pos >= permutation_.size(), there
+    // are no more elements we can add to the permutation.
+    if (pos >= permutation_.size()) {
+      ordering_index_ = -1;
+      return;
+    }
+    // According to Invariant(pos - 1).2, elements that can be used at pos are
+    // permutations_[pos], ..., permutations_.back(). Starts the iteration at
+    // permutations_[pos].
+    Set(pos, pos);
+    // Invariant(pos) holds.
+  }
+  // Invariant(pos - 1) hold. We have a permutation.
+}
+
+// Unset the element at pos.
+//
+//  - Precondition: Invariant(pos) holds.
+//  - Postcondition: Invariant(pos - 1) holds.
+inline void DagTopologicalSortIterator::Iterator::Unset(int pos) {
+  const int n = permutation_[pos];
+  // Before the loop: Invariant(pos).2 and Invariant(pos).3 hold.
+  // After the swap below: Invariant(pos - 1).2 and Invariant(pos - 1).3 hold.
+  for (const int c : graph_[n]) {
+    if (missing_parent_numbers_[c] == 0) permutation_.pop_back();
+    ++missing_parent_numbers_[c];
+  }
+  std::swap(permutation_[element_original_position_[pos]], permutation_[pos]);
+  // Invariant(pos).4 -> Invariant(pos - 1).4.
+  element_original_position_[pos] = pos;
+}
+
+// Set the element at pos to the element at k.
+//
+//  - Precondition: Invariant(pos - 1) holds and k in [pos,
+//    permutation_.size()).
+//  - Postcondition: Invariant(pos) holds and permutation_[pos] has been swapped
+//    with permutation_[k].
+inline void DagTopologicalSortIterator::Iterator::Set(int pos, int k) {
+  int n = permutation_[k];
+  // Before the loop: Invariant(pos - 1).2 and Invariant(pos - 1).3 hold.
+  // After the loop: Invariant(pos).2 and Invariant(pos).3 hold.
+  for (int c : graph_[n]) {
+    --missing_parent_numbers_[c];
+    if (missing_parent_numbers_[c] == 0) permutation_.push_back(c);
+  }
+  // Invariant(pos - 1).1 -> Invariant(pos).1.
+  std::swap(permutation_[k], permutation_[pos]);
+  // Invariant(pos - 1).4 -> Invariant(pos).4.
+  element_original_position_[pos] = k;
+}
+
+template <typename K, typename V>
+inline int MergeableOccurrenceList<K, V>::InternalKey(K key) const {
+  DCHECK_GE(key, 0);
+  DCHECK_LT(key, rows_.size());
+  if constexpr (std::is_same_v<K, int>) {
+    return key;
+  } else {
+    return key.value();
+  }
+}
+
 }  // namespace sat
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_SAT_UTIL_H_
+#endif  // ORTOOLS_SAT_UTIL_H_

@@ -36,18 +36,18 @@
 //     LOG(INFO) << DUMP_VARS_WITH_BINDINGS((x, y, z), x, *y, f(z), other_var);
 //   }
 
-#ifndef OR_TOOLS_BASE_DUMP_VARS_H_
-#define OR_TOOLS_BASE_DUMP_VARS_H_
+#ifndef ORTOOLS_BASE_DUMP_VARS_H_
+#define ORTOOLS_BASE_DUMP_VARS_H_
 
 #include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
+#include "ortools/base/strong_vector.h"
 
 /* need extra level to force extra eval */
 #define DUMP_FOR_EACH_N0(F)
@@ -62,6 +62,7 @@
 #define DUMP_FOR_EACH_N9(F, a, ...) F(a) DUMP_FOR_EACH_N8(F, __VA_ARGS__)
 #define DUMP_FOR_EACH_N10(F, a, ...) F(a) DUMP_FOR_EACH_N9(F, __VA_ARGS__)
 #define DUMP_FOR_EACH_N11(F, a, ...) F(a) DUMP_FOR_EACH_N10(F, __VA_ARGS__)
+#define DUMP_FOR_EACH_N12(F, a, ...) F(a) DUMP_FOR_EACH_N11(F, __VA_ARGS__)
 
 #define DUMP_CONCATENATE(x, y) x##y
 #define DUMP_FOR_EACH_(N, F, ...) \
@@ -69,8 +70,8 @@
 
 #define DUMP_NARG(...) DUMP_NARG_(__VA_OPT__(__VA_ARGS__, ) DUMP_RSEQ_N())
 #define DUMP_NARG_(...) DUMP_ARG_N(__VA_ARGS__)
-#define DUMP_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, N, ...) N
-#define DUMP_RSEQ_N() 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+#define DUMP_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, N, ...) N
+#define DUMP_RSEQ_N() 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 #define DUMP_FOR_EACH(F, ...) \
   DUMP_FOR_EACH_(DUMP_NARG(__VA_ARGS__), F __VA_OPT__(, __VA_ARGS__))
 
@@ -134,6 +135,16 @@ std::ostream& operator<<(std::ostream& os, const ::std::optional<T>& opt) {
     os << ::std::to_string(opt.value());
   else
     os << "(none)";
+  return os;
+}
+
+// needed by graph tests
+template <typename T, typename U>
+std::ostream& operator<<(std::ostream& os,
+                         const ::util_intops::StrongVector<T, U>& vec) {
+  for (U it : vec) {
+    os << ::std::to_string(it) << ',';
+  }
   return os;
 }
 
@@ -219,4 +230,4 @@ Dump<F> make_dump_vars(DumpNames&& names, F f) {
 }  // namespace internal_dump_vars
 }  // namespace operations_research::base
 
-#endif  // OR_TOOLS_BASE_DUMP_VARS_H_
+#endif  // ORTOOLS_BASE_DUMP_VARS_H_

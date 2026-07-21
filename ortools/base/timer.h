@@ -11,15 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_BASE_TIMER_H_
-#define OR_TOOLS_BASE_TIMER_H_
+#ifndef ORTOOLS_BASE_TIMER_H_
+#define ORTOOLS_BASE_TIMER_H_
 
 #include <cstdint>
 
-#include "absl/log/check.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "ortools/base/macros.h"
 
 class WallTimer {
  public:
@@ -83,6 +81,9 @@ typedef CycleTimer SimpleCycleTimer;
 // Conversion routines between CycleTimer::GetCycles and actual times.
 class CycleTimerBase {
  public:
+  CycleTimerBase(const CycleTimerBase&) = delete;
+  CycleTimerBase& operator=(const CycleTimerBase&) = delete;
+
   static int64_t SecondsToCycles(double s) {
     return static_cast<int64_t>(s * 1e9);
   }
@@ -109,7 +110,5 @@ class ScopedWallTime {
 
   // When the instance was created.
   WallTimer timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedWallTime);
 };
-#endif  // OR_TOOLS_BASE_TIMER_H_
+#endif  // ORTOOLS_BASE_TIMER_H_

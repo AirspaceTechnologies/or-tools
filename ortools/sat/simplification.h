@@ -16,8 +16,8 @@
 // "Effective Preprocessing in SAT through Variable and Clause Elimination",
 // Niklas Een and Armin Biere, published in the SAT 2005 proceedings.
 
-#ifndef OR_TOOLS_SAT_SIMPLIFICATION_H_
-#define OR_TOOLS_SAT_SIMPLIFICATION_H_
+#ifndef ORTOOLS_SAT_SIMPLIFICATION_H_
+#define ORTOOLS_SAT_SIMPLIFICATION_H_
 
 #include <cstdint>
 #include <deque>
@@ -28,7 +28,6 @@
 #include "absl/types/span.h"
 #include "ortools/base/adjustable_priority_queue.h"
 #include "ortools/base/strong_vector.h"
-#include "ortools/sat/drat_proof_handler.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_parameters.pb.h"
 #include "ortools/sat/sat_solver.h"
@@ -86,14 +85,15 @@ class SatPostsolver {
   int NumClauses() const { return clauses_start_.size(); }
   std::vector<Literal> Clause(int i) const {
     // TODO(user): we could avoid the copy here, but because clauses_literals_
-    // is a deque, we do need a special return class and cannot juste use
+    // is a deque, we do need a special return class and cannot just use
     // absl::Span<Literal> for instance.
-    const int begin = clauses_start_[i];
-    const int end = i + 1 < clauses_start_.size() ? clauses_start_[i + 1]
-                                                  : clauses_literals_.size();
+    const int64_t begin = clauses_start_[i];
+    const int64_t end = i + 1 < clauses_start_.size()
+                            ? clauses_start_[i + 1]
+                            : clauses_literals_.size();
     std::vector<Literal> result(clauses_literals_.begin() + begin,
                                 clauses_literals_.begin() + end);
-    for (int j = 0; j < result.size(); ++j) {
+    for (int64_t j = 0; j < result.size(); ++j) {
       if (result[j] == associated_literal_[i]) {
         std::swap(result[0], result[j]);
         break;
@@ -118,7 +118,7 @@ class SatPostsolver {
 
   // Stores the arguments of the Add() calls: clauses_start_[i] is the index of
   // the first literal of the clause #i in the clauses_literals_ deque.
-  std::vector<int> clauses_start_;
+  std::vector<int64_t> clauses_start_;
   std::deque<Literal> clauses_literals_;
   std::vector<Literal> associated_literal_;
 
@@ -151,10 +151,7 @@ class SatPresolver {
   typedef int32_t ClauseIndex;
 
   explicit SatPresolver(SatPostsolver* postsolver, SolverLogger* logger)
-      : postsolver_(postsolver),
-        num_trivial_clauses_(0),
-        drat_proof_handler_(nullptr),
-        logger_(logger) {}
+      : postsolver_(postsolver), num_trivial_clauses_(0), logger_(logger) {}
 
   // This type is neither copyable nor movable.
   SatPresolver(const SatPresolver&) = delete;
@@ -229,10 +226,6 @@ class SatPresolver {
   // Visible for testing. Just applies the BVA step of the presolve.
   void PresolveWithBva();
 
-  void SetDratProofHandler(DratProofHandler* drat_proof_handler) {
-    drat_proof_handler_ = drat_proof_handler;
-  }
-
  private:
   // Internal function used by ProcessClauseToSimplifyOthers().
   bool ProcessClauseToSimplifyOthersUsingLiteral(ClauseIndex clause_index,
@@ -243,10 +236,14 @@ class SatPresolver {
   // after this call.
   void AddClauseInternal(std::vector<Literal>* clause);
 
+  // Since we only cleanup the list lazily, literal_to_clauses_ memory usage
+  // can get out of hand, we clean it up periodically.
+  void RebuildLiteralToClauses();
+
   // Clause removal function.
   void Remove(ClauseIndex ci);
   void RemoveAndRegisterForPostsolve(ClauseIndex ci, Literal x);
-  void RemoveAndRegisterForPostsolveAllClauseContaining(Literal x);
+  void RemoveAllClauseContaining(Literal x, bool register_for_postsolve);
 
   // Call ProcessClauseToSimplifyOthers() on all the clauses in
   // clause_to_process_ and empty the list afterwards. Note that while some
@@ -257,7 +254,7 @@ class SatPresolver {
   // Finds the literal from the clause that occur the less in the clause
   // database.
   Literal FindLiteralWithShortestOccurrenceList(
-      const std::vector<Literal>& clause);
+      absl::Span<const Literal> clause);
   LiteralIndex FindLiteralWithShortestOccurrenceListExcluding(
       const std::vector<Literal>& clause, Literal to_exclude);
 
@@ -354,6 +351,10 @@ class SatPresolver {
 
   // Occurrence list. For each literal, contains the ClauseIndex of the clause
   // that contains it (ordered by clause index).
+  //
+  // This is cleaned up lazily, or when num_deleted_literals_since_last_cleanup_
+  // becomes big.
+  int64_t num_deleted_literals_since_last_cleanup_ = 0;
   util_intops::StrongVector<LiteralIndex, std::vector<ClauseIndex>>
       literal_to_clauses_;
 
@@ -369,7 +370,6 @@ class SatPresolver {
 
   int num_trivial_clauses_;
   SatParameters parameters_;
-  DratProofHandler* drat_proof_handler_;
   TimeLimit* time_limit_ = nullptr;
   SolverLogger* logger_;
 };
@@ -430,11 +430,10 @@ int ComputeResolvantSize(Literal x, const std::vector<Literal>& a,
 // constraints.
 void ProbeAndFindEquivalentLiteral(
     SatSolver* solver, SatPostsolver* postsolver,
-    DratProofHandler* drat_proof_handler,
     util_intops::StrongVector<LiteralIndex, LiteralIndex>* mapping,
     SolverLogger* = nullptr);
 
 }  // namespace sat
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_SAT_SIMPLIFICATION_H_
+#endif  // ORTOOLS_SAT_SIMPLIFICATION_H_

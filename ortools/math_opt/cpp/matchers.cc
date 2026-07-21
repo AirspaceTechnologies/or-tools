@@ -25,6 +25,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
 #include "gtest/gtest.h"
@@ -208,8 +209,8 @@ class MapToDoubleMatcher
 
 }  // namespace
 
-Matcher<VariableMap<double>> IsNearlySubsetOf(VariableMap<double> expected,
-                                              double tolerance) {
+Matcher<VariableMap<double>> IsNearlySupersetOf(VariableMap<double> expected,
+                                                double tolerance) {
   return Matcher<VariableMap<double>>(new MapToDoubleMatcher<Variable>(
       std::move(expected), /*all_keys=*/false, tolerance));
 }
@@ -220,7 +221,7 @@ Matcher<VariableMap<double>> IsNear(VariableMap<double> expected,
       std::move(expected), /*all_keys=*/true, tolerance));
 }
 
-Matcher<LinearConstraintMap<double>> IsNearlySubsetOf(
+Matcher<LinearConstraintMap<double>> IsNearlySupersetOf(
     LinearConstraintMap<double> expected, double tolerance) {
   return Matcher<LinearConstraintMap<double>>(
       new MapToDoubleMatcher<LinearConstraint>(std::move(expected),
@@ -242,7 +243,7 @@ Matcher<absl::flat_hash_map<QuadraticConstraint, double>> IsNear(
           std::move(expected), /*all_keys=*/true, tolerance));
 }
 
-Matcher<absl::flat_hash_map<QuadraticConstraint, double>> IsNearlySubsetOf(
+Matcher<absl::flat_hash_map<QuadraticConstraint, double>> IsNearlySupersetOf(
     absl::flat_hash_map<QuadraticConstraint, double> expected,
     double tolerance) {
   return Matcher<absl::flat_hash_map<QuadraticConstraint, double>>(
@@ -259,7 +260,7 @@ Matcher<absl::flat_hash_map<K, double>> IsNear(
 }
 
 template <typename K>
-Matcher<absl::flat_hash_map<K, double>> IsNearlySubsetOf(
+Matcher<absl::flat_hash_map<K, double>> IsNearlySupersetOf(
     absl::flat_hash_map<K, double> expected, const double tolerance) {
   return Matcher<absl::flat_hash_map<K, double>>(new MapToDoubleMatcher<K>(
       std::move(expected), /*all_keys=*/false, tolerance));
@@ -871,7 +872,7 @@ std::vector<TerminationReason> CompatibleReasons(
 }
 
 Matcher<std::vector<Solution>> CheckSolutions(
-    const std::vector<Solution>& expected_solutions,
+    absl::Span<const Solution> expected_solutions,
     const SolveResultMatcherOptions& options) {
   if (options.first_solution_only && !expected_solutions.empty()) {
     return FirstElementIs(

@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_BASE_MATHUTIL_H_
-#define OR_TOOLS_BASE_MATHUTIL_H_
+#ifndef ORTOOLS_BASE_MATHUTIL_H_
+#define ORTOOLS_BASE_MATHUTIL_H_
 
 #include <math.h>
 
@@ -24,7 +24,6 @@
 
 #include "absl/base/casts.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/macros.h"
 
 namespace operations_research {
 class MathUtil {
@@ -173,12 +172,6 @@ class MathUtil {
   // the results are undefined.
   template <class IntOut, class FloatIn>
   static IntOut SafeCast(FloatIn x) {
-    COMPILE_ASSERT(!std::numeric_limits<FloatIn>::is_integer,
-                   FloatIn_is_integer);
-    COMPILE_ASSERT(std::numeric_limits<IntOut>::is_integer,
-                   IntOut_is_not_integer);
-    COMPILE_ASSERT(std::numeric_limits<IntOut>::radix == 2, IntOut_is_base_2);
-
     // Special case NaN, for which the logic below doesn't work.
     if (std::isnan(x)) {
       return 0;
@@ -230,11 +223,6 @@ class MathUtil {
   // --------------------------------------------------------------------
   template <class IntOut, class FloatIn>
   static IntOut SafeRound(FloatIn x) {
-    COMPILE_ASSERT(!std::numeric_limits<FloatIn>::is_integer,
-                   FloatIn_is_integer);
-    COMPILE_ASSERT(std::numeric_limits<IntOut>::is_integer,
-                   IntOut_is_not_integer);
-
     if (std::isnan(x)) {
       return 0;
     } else {
@@ -336,4 +324,4 @@ class MathUtil {
 };
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_BASE_MATHUTIL_H_
+#endif  // ORTOOLS_BASE_MATHUTIL_H_

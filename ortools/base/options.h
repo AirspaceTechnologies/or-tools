@@ -11,9 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_BASE_OPTIONS_H_
-#define OR_TOOLS_BASE_OPTIONS_H_
+#ifndef ORTOOLS_BASE_OPTIONS_H_
+#define ORTOOLS_BASE_OPTIONS_H_
 
-#include "ortools/base/file.h"
-
-#endif  // OR_TOOLS_BASE_OPTIONS_H_
+#endif  // ORTOOLS_BASE_OPTIONS_H_

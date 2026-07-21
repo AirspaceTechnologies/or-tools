@@ -11,17 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_LINEAR_SOLVER_PROTO_SOLVER_PROTO_UTILS_H_
-#define OR_TOOLS_LINEAR_SOLVER_PROTO_SOLVER_PROTO_UTILS_H_
+#ifndef ORTOOLS_LINEAR_SOLVER_PROTO_SOLVER_PROTO_UTILS_H_
+#define ORTOOLS_LINEAR_SOLVER_PROTO_SOLVER_PROTO_UTILS_H_
 
 #include <string>
 #include <type_traits>
 #include <utility>
 
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "google/protobuf/message.h"
-#include "ortools/base/logging.h"
 #include "ortools/linear_solver/linear_solver.pb.h"
 #include "ortools/port/proto_utils.h"
 
@@ -83,4 +83,4 @@ std::string EncodeParametersAsString(const P& parameters) {
 
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_LINEAR_SOLVER_PROTO_SOLVER_PROTO_UTILS_H_
+#endif  // ORTOOLS_LINEAR_SOLVER_PROTO_SOLVER_PROTO_UTILS_H_

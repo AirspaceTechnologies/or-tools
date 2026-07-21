@@ -120,8 +120,8 @@
 // Keywords: Push-relabel, max-flow, network, graph, Goldberg, Tarjan, Dinic,
 //           Dinitz.
 
-#ifndef OR_TOOLS_GRAPH_GENERIC_MAX_FLOW_H_
-#define OR_TOOLS_GRAPH_GENERIC_MAX_FLOW_H_
+#ifndef ORTOOLS_GRAPH_GENERIC_MAX_FLOW_H_
+#define ORTOOLS_GRAPH_GENERIC_MAX_FLOW_H_
 
 #include <algorithm>
 #include <cstdint>
@@ -133,7 +133,6 @@
 
 #include "absl/strings/string_view.h"
 #include "ortools/base/logging.h"
-#include "ortools/graph/ebert_graph.h"
 #include "ortools/graph/flow_problem.pb.h"
 #include "ortools/util/stats.h"
 #include "ortools/util/zvector.h"
@@ -215,7 +214,7 @@ class MaxFlowStatusClass {
 // associated to an unique reverse arc going in the opposite direction
 // 'head -> tail'. We must also have reverse[reverse[arc]] = arc.
 //
-// This works with all the reverse arc graphs from 'util/graph/graph.h' and
+// This works with all the reverse arc graphs from 'ortools/graph/graph.h' and
 // uses the API defined there.
 //
 // We actually support two kind of graphs with "reverse" arcs depending on the
@@ -1408,4 +1407,4 @@ FlowModelProto GenericMaxFlow<Graph, ArcFlowT, FlowSumT>::CreateFlowModel() {
 
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GRAPH_GENERIC_MAX_FLOW_H_
+#endif  // ORTOOLS_GRAPH_GENERIC_MAX_FLOW_H_

@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_MATH_OPT_STORAGE_ATOMIC_CONSTRAINT_STORAGE_H_
-#define OR_TOOLS_MATH_OPT_STORAGE_ATOMIC_CONSTRAINT_STORAGE_H_
+#ifndef ORTOOLS_MATH_OPT_STORAGE_ATOMIC_CONSTRAINT_STORAGE_H_
+#define ORTOOLS_MATH_OPT_STORAGE_ATOMIC_CONSTRAINT_STORAGE_H_
 
 #include <algorithm>
 #include <cstdint>
@@ -188,7 +188,8 @@ typename AtomicConstraintStorage<ConstraintData>::IdType
 AtomicConstraintStorage<ConstraintData>::AddConstraint(
     ConstraintData constraint) {
   const std::vector<VariableId> vars = constraint.RelatedVariables();
-  const IdType id = next_id_++;
+  const IdType id = next_id_;
+  ++next_id_;
   CHECK(constraint_data_.insert({id, std::move(constraint)}).second);
   for (const VariableId v : vars) {
     constraints_by_variable_[v].insert(id);
@@ -291,4 +292,4 @@ AtomicConstraintStorage<ConstraintData>::Update(const Diff& diff) const {
 
 }  // namespace operations_research::math_opt
 
-#endif  // OR_TOOLS_MATH_OPT_STORAGE_ATOMIC_CONSTRAINT_STORAGE_H_
+#endif  // ORTOOLS_MATH_OPT_STORAGE_ATOMIC_CONSTRAINT_STORAGE_H_

@@ -49,7 +49,7 @@ namespace {
 
 // Returns an InternalError with the input status message if the input status is
 // not OK.
-absl::Status ToInternalError(const absl::Status original) {
+absl::Status ToInternalError(absl::Status original) {
   if (original.ok()) {
     return original;
   }
@@ -120,10 +120,16 @@ absl::StatusOr<SolveResultProto> Solver::Solve(const SolveArgs& arguments) {
       ValidateModelSolveParameters(arguments.model_parameters, model_summary_))
       << "invalid model_parameters";
 
+  RETURN_IF_ERROR(ValidateCallbackRegistration(arguments.callback_registration,
+                                               model_summary_));
   SolverInterface::Callback cb = nullptr;
+  if (!arguments.callback_registration.request_registration().empty() &&
+      arguments.user_cb == nullptr) {
+    return absl::InvalidArgumentError(
+        "no callback function was provided but callback events were "
+        "registered");
+  }
   if (arguments.user_cb != nullptr) {
-    RETURN_IF_ERROR(ValidateCallbackRegistration(
-        arguments.callback_registration, model_summary_));
     cb = [&](const CallbackDataProto& callback_data)
         -> absl::StatusOr<CallbackResultProto> {
       RETURN_IF_ERROR(ValidateCallbackDataProto(
@@ -201,7 +207,7 @@ Solver::ComputeInfeasibleSubsystem(
   RETURN_IF_ERROR(ValidateSolveParameters(arguments.parameters))
       << "invalid parameters";
 
-  ASSIGN_OR_RETURN(const ComputeInfeasibleSubsystemResultProto result,
+  ASSIGN_OR_RETURN(ComputeInfeasibleSubsystemResultProto result,
                    underlying_solver_->ComputeInfeasibleSubsystem(
                        arguments.parameters, arguments.message_callback,
                        arguments.interrupter));

@@ -11,14 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_MATH_OPT_CONSTRAINTS_INDICATOR_STORAGE_H_
-#define OR_TOOLS_MATH_OPT_CONSTRAINTS_INDICATOR_STORAGE_H_
+#ifndef ORTOOLS_MATH_OPT_CONSTRAINTS_INDICATOR_STORAGE_H_
+#define ORTOOLS_MATH_OPT_CONSTRAINTS_INDICATOR_STORAGE_H_
 
 #include <limits>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "ortools/math_opt/elemental/elements.h"
 #include "ortools/math_opt/model.pb.h"
 #include "ortools/math_opt/model_update.pb.h"
 #include "ortools/math_opt/storage/atomic_constraint_storage.h"
@@ -34,6 +35,8 @@ struct IndicatorConstraintData {
   using IdType = IndicatorConstraintId;
   using ProtoType = IndicatorConstraintProto;
   using UpdatesProtoType = IndicatorConstraintUpdatesProto;
+  static constexpr ElementType kElementType = ElementType::kIndicatorConstraint;
+  static constexpr bool kSupportsElemental = true;
 
   // The `in_proto` must be in a valid state; see the inline comments on
   // `IndicatorConstraintProto` for details.
@@ -55,8 +58,10 @@ struct IndicatorConstraintData {
 template <>
 struct AtomicConstraintTraits<IndicatorConstraintId> {
   using ConstraintData = IndicatorConstraintData;
+  static constexpr ElementType kElementType = ElementType::kIndicatorConstraint;
+  static constexpr bool kSupportsElemental = true;
 };
 
 }  // namespace operations_research::math_opt
 
-#endif  // OR_TOOLS_MATH_OPT_CONSTRAINTS_INDICATOR_STORAGE_H_
+#endif  // ORTOOLS_MATH_OPT_CONSTRAINTS_INDICATOR_STORAGE_H_

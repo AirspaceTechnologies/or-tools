@@ -1,13 +1,16 @@
 FROM ortools/cmake:fedora_swig AS env
 
 RUN dnf -y update \
-&& dnf -y install java-11-openjdk java-11-openjdk-devel maven \
+&& dnf -y install java-21-openjdk java-21-openjdk-devel maven \
 && dnf clean all
 ENV JAVA_HOME=/usr/lib/jvm/java-openjdk
 
 FROM env AS devel
 WORKDIR /home/project
 COPY . .
+
+ARG CMAKE_BUILD_PARALLEL_LEVEL
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL:-4}
 
 FROM devel AS build
 RUN cmake -S. -Bbuild -DBUILD_JAVA=ON -DSKIP_GPG=ON \

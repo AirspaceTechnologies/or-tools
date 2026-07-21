@@ -14,8 +14,8 @@
 // IWYU pragma: private, include "ortools/math_opt/cpp/math_opt.h"
 // IWYU pragma: friend "ortools/math_opt/cpp/.*"
 
-#ifndef OR_TOOLS_MATH_OPT_CPP_MODEL_SOLVE_PARAMETERS_H_
-#define OR_TOOLS_MATH_OPT_CPP_MODEL_SOLVE_PARAMETERS_H_
+#ifndef ORTOOLS_MATH_OPT_CPP_MODEL_SOLVE_PARAMETERS_H_
+#define ORTOOLS_MATH_OPT_CPP_MODEL_SOLVE_PARAMETERS_H_
 
 #include <sys/types.h>
 
@@ -128,7 +128,7 @@ struct ModelSolveParameters {
 
     // Returns a failure if the referenced variables and constraints don't
     // belong to the input expected_storage (which must not be nullptr).
-    absl::Status CheckModelStorage(const ModelStorage* expected_storage) const;
+    absl::Status CheckModelStorage(ModelStorageCPtr expected_storage) const;
 
     // Returns the proto equivalent of this object.
     //
@@ -215,7 +215,7 @@ struct ModelSolveParameters {
 
   // Returns a failure if the referenced variables and constraints do not belong
   // to the input expected_storage (which must not be nullptr).
-  absl::Status CheckModelStorage(const ModelStorage* expected_storage) const;
+  absl::Status CheckModelStorage(ModelStorageCPtr expected_storage) const;
 
   // Returns the proto equivalent of this object.
   //
@@ -244,4 +244,4 @@ ModelSolveParameters ModelSolveParameters::OnlySomePrimalVariables(
 }  // namespace math_opt
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_MATH_OPT_CPP_MODEL_SOLVE_PARAMETERS_H_
+#endif  // ORTOOLS_MATH_OPT_CPP_MODEL_SOLVE_PARAMETERS_H_

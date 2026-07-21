@@ -11,18 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_BASE_PROTOBUF_UTIL_H_
-#define OR_TOOLS_BASE_PROTOBUF_UTIL_H_
+#ifndef ORTOOLS_BASE_PROTOBUF_UTIL_H_
+#define ORTOOLS_BASE_PROTOBUF_UTIL_H_
 
 #include <string>
+#include <vector>
 
+#include "absl/log/check.h"
 #include "google/protobuf/repeated_field.h"
+#include "google/protobuf/repeated_ptr_field.h"
 #include "google/protobuf/text_format.h"
-#include "ortools/base/logging.h"
 
-namespace google {
-namespace protobuf {
-namespace util {
+namespace google::protobuf::util {
 // RepeatedPtrField version.
 template <typename T>
 inline void Truncate(RepeatedPtrField<T>* array, int new_size) {
@@ -107,8 +107,6 @@ T ParseTextOrDie(const std::string& input) {
   return result;
 }
 
-}  // namespace util
-}  // namespace protobuf
-}  // namespace google
+}  // namespace google::protobuf::util
 
-#endif  // OR_TOOLS_BASE_PROTOBUF_UTIL_H_
+#endif  // ORTOOLS_BASE_PROTOBUF_UTIL_H_

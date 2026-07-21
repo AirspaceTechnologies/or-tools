@@ -33,10 +33,10 @@ help:
 	@echo -e "\t${BOLD}test_archives${RESET}: Test each OR-Tools archives for all ${BOLD}<distro>${RESET} and ${BOLD}<lang>${RESET}."
 	@echo
 	@echo -e "${BOLD}PYTHON TARGETS${RESET}"
-	@echo -e "\t${BOLD}python${RESET}: Build musllinux and manylinux python 'ortools' wheel packages (3.8+)."
-	@echo -e "\t${BOLD}python_<platform>${RESET}: Build all python 'ortools' wheel packages (3.8+) for a specific platform."
-	@echo -e "\t${BOLD}python_<platform>_<step>${RESET}: Build all python 'ortools' wheel packages (3.8+) for a specific platform."
-	@echo -e "\t${BOLD}python_<target>_<step>${RESET}: Build python 'ortools' wheel packages (3.8+) for a specific target."
+	@echo -e "\t${BOLD}python${RESET}: Build musllinux and manylinux python 'ortools' wheel packages (3.9+)."
+	@echo -e "\t${BOLD}python_<platform>${RESET}: Build all python 'ortools' wheel packages (3.9+) for a specific platform."
+	@echo -e "\t${BOLD}python_<platform>_<step>${RESET}: Build all python 'ortools' wheel packages (3.9+) for a specific platform."
+	@echo -e "\t${BOLD}python_<target>_<step>${RESET}: Build python 'ortools' wheel packages (3.9+) for a specific target."
 	@echo -e "\t${BOLD}save_python_<target>${RESET}: Save python 'ortools' image."
 	@echo -e "\t${BOLD}clean_python_<target>${RESET}: Clean manylinux and musllinux python 'ortools' wheel packages."
 	@echo -e "\t${BOLD}sh_python_<target>${RESET}: Run a container using the python 'ortools' image."
@@ -54,12 +54,12 @@ help:
 	@echo -e "\t\t${BOLD}manylinux${RESET} (manylinux_2_28)"
 	@echo
 	@echo -e "\t${BOLD}<version>${RESET}:"
-	@echo -e "\t\t${BOLD}38${RESET} Python3.8"
 	@echo -e "\t\t${BOLD}39${RESET} Python3.9"
 	@echo -e "\t\t${BOLD}310${RESET} Python3.10"
 	@echo -e "\t\t${BOLD}311${RESET} Python3.11"
 	@echo -e "\t\t${BOLD}312${RESET} Python3.12"
 	@echo -e "\t\t${BOLD}313${RESET} Python3.13"
+	@echo -e "\t\t${BOLD}314${RESET} Python3.14"
 	@echo
 	@echo -e "\t${BOLD}<step>${RESET}:"
 	@echo -e "\t\t${BOLD}env${RESET}"
@@ -94,9 +94,10 @@ help:
 	@echo -e "\t\t${BOLD}alpine-edge${RESET} (latest)"
 	@echo -e "\t\t${BOLD}archlinux${RESET} (latest)"
 	@echo -e "\t\t${BOLD}debian-sid${RESET} (unstable)"
-#	@echo -e "\t\t${BOLD}debian-13${RESET} (Trixie)"
+	#@echo -e "\t\t${BOLD}debian-13${RESET} (Trixie)"
 	@echo -e "\t\t${BOLD}debian-12${RESET} (Bookworm)"
 	@echo -e "\t\t${BOLD}debian-11${RESET} (Bullseye)"
+	@echo -e "\t\t${BOLD}fedora-42${RESET}"
 	@echo -e "\t\t${BOLD}fedora-41${RESET}"
 	@echo -e "\t\t${BOLD}fedora-40${RESET}"
 	@echo -e "\t\t${BOLD}opensuse-leap${RESET} (latest)"
@@ -116,9 +117,9 @@ help:
 	@echo
 	@echo -e "\t${BOLD}<lang>${RESET}: Language to build"
 	@echo -e "\t\t${BOLD}cpp${RESET} C++"
-	@echo -e "\t\t${BOLD}dotnet${RESET} .Net Core 3.1 and/or .Net 6.0 wrappers"
+	@echo -e "\t\t${BOLD}dotnet${RESET} .Net 8.0 wrappers"
 	@echo -e "\t\t${BOLD}java${RESET} Java (JDK 8.0) wrappers"
-	@echo -e "\t\t${BOLD}python${RESET} Python 3.8+ wrappers"
+	@echo -e "\t\t${BOLD}python${RESET} Python 3.9+ wrappers"
 	@echo
 	@echo -e "\te.g. 'make sh_amd64_ubuntu-22.04_cpp_build'"
 	@echo -e "\te.g. 'make amd64_ubuntu-22.04_cpp_archive'"
@@ -150,7 +151,7 @@ OR_TOOLS_SHA1 := $(shell git rev-parse --verify HEAD)
 include ../../Version.txt
 OR_TOOLS_PATCH := $(shell git rev-list --count v${OR_TOOLS_MAJOR}.0..HEAD || echo 0)
 OR_TOOLS_VERSION := ${OR_TOOLS_MAJOR}.${OR_TOOLS_MINOR}.${OR_TOOLS_PATCH}
-ifdef PRE_RELEASE
+ifdef RELEASE_CANDIDATE
 OR_TOOLS_VERSION := ${OR_TOOLS_VERSION}-rc
 endif
 $(info branch: ${OR_TOOLS_BRANCH})
@@ -204,7 +205,7 @@ cache/python: | cache
 	-mkdir $@
 
 ## MANYLINUX ##
-PYTHON_VERSIONS := 38 39 310 311 312 313
+PYTHON_VERSIONS := 39 310 311 312 313 314
 
 export/python/manylinux: | export/python
 	-mkdir -p $@
@@ -432,7 +433,7 @@ DISTROS := \
  alpine-edge \
  archlinux \
  debian-11 debian-12 debian-sid \
- fedora-40 fedora-41 \
+ fedora-40 fedora-41 fedora-42 \
  opensuse-leap \
  rockylinux-9 \
  ubuntu-20.04 ubuntu-22.04 ubuntu-24.04 ubuntu-24.10

@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_GLOP_ENTERING_VARIABLE_H_
-#define OR_TOOLS_GLOP_ENTERING_VARIABLE_H_
+#ifndef ORTOOLS_GLOP_ENTERING_VARIABLE_H_
+#define ORTOOLS_GLOP_ENTERING_VARIABLE_H_
 
 #include <cstdint>
 #include <string>
@@ -74,12 +74,14 @@ class EnteringVariable {
   // Sets the parameters.
   void SetParameters(const GlopParameters& parameters);
 
+  void SetRandom(absl::BitGenRef random) { random_ = random; }
+
   // Stats related functions.
   std::string StatString() const { return stats_.StatString(); }
 
   // Deterministic time used by some of the functions of this class.
   //
-  // TODO(user): Be exhausitive and more precise.
+  // TODO(user): Be exhaustive and more precise.
   double DeterministicTime() const {
     return DeterministicTimeForFpOperations(num_operations_);
   }
@@ -143,4 +145,4 @@ class EnteringVariable {
 }  // namespace operations_research
 
 #endif  // SWIG
-#endif  // OR_TOOLS_GLOP_ENTERING_VARIABLE_H_
+#endif  // ORTOOLS_GLOP_ENTERING_VARIABLE_H_

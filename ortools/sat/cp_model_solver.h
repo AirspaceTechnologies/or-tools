@@ -11,18 +11,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_SAT_CP_MODEL_SOLVER_H_
-#define OR_TOOLS_SAT_CP_MODEL_SOLVER_H_
+#ifndef ORTOOLS_SAT_CP_MODEL_SOLVER_H_
+#define ORTOOLS_SAT_CP_MODEL_SOLVER_H_
 
 #include <functional>
 #include <string>
 
 #include "absl/flags/declare.h"
+#include "absl/strings/string_view.h"
+#include "ortools/base/base_export.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_parameters.pb.h"
 
-ABSL_DECLARE_FLAG(bool, cp_model_dump_response);
+#ifndef SWIG
+OR_DLL ABSL_DECLARE_FLAG(bool, cp_model_dump_response);
+#endif
 
 namespace operations_research {
 namespace sat {
@@ -56,9 +60,11 @@ std::string CpSolverResponseStats(const CpSolverResponse& response,
  * features by configuring some classes in the Model before solve.
  *
  * For instance:
+ * - StopSearch(&model);
  * - model->Add(NewSatParameters(parameters_as_string_or_proto));
- * - model->GetOrCreate<TimeLimit>()->RegisterExternalBooleanAsLimit(&stop);
  * - model->Add(NewFeasibleSolutionObserver(observer));
+ * - model->Add(NewFeasibleSolutionLogCallback(callback));
+ * - model->Add(NewBestBoundCallback(callback));
  */
 CpSolverResponse SolveCpModel(const CpModelProto& model_proto, Model* model);
 
@@ -68,7 +74,7 @@ CpSolverResponse SolveCpModel(const CpModelProto& model_proto, Model* model);
  * format, and returns an instance of CpSolverResponse.
  */
 CpSolverResponse SolveWithParameters(const CpModelProto& model_proto,
-                                     const std::string& params);
+                                     absl::string_view params);
 #endif  // !__PORTABLE_PLATFORM__
 
 /**
@@ -107,7 +113,7 @@ std::function<void(Model*)> NewFeasibleSolutionLogCallback(
 
 /**
  * Creates a callbacks that will be called on each new best objective bound
- * found.
+ * found. It is guaranteed that the best bound is strictly improving.
  *
  * Note that this function is called before the update takes place.
  */
@@ -121,18 +127,14 @@ std::function<void(Model*)> NewBestBoundCallback(
    \endcode
  * before calling \c SolveCpModel().
  */
-#if !defined(__PORTABLE_PLATFORM__)
-std::function<SatParameters(Model*)> NewSatParameters(
-    const std::string& params);
-#endif  // !__PORTABLE_PLATFORM__
+std::function<SatParameters(Model*)> NewSatParameters(absl::string_view params);
 std::function<SatParameters(Model*)> NewSatParameters(
     const SatParameters& parameters);
 
-// TODO(user): Clean this up.
-/// Solves a CpModelProto without any processing. Only used for unit tests.
-void LoadAndSolveCpModelForTest(const CpModelProto& model_proto, Model* model);
+/// Stops the current search.
+void StopSearch(Model* model);
 
 }  // namespace sat
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_SAT_CP_MODEL_SOLVER_H_
+#endif  // ORTOOLS_SAT_CP_MODEL_SOLVER_H_
