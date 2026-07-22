@@ -20,7 +20,9 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/optimization.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -29,7 +31,6 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "ortools/base/helpers.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/options.h"
 #include "ortools/base/status_macros.h"
 #include "ortools/linear_solver/linear_solver.pb.h"
@@ -69,6 +70,7 @@ std::string AbslUnparseFlag(const FileFormat f) {
     case FileFormat::kLP:
       return "lp";
   }
+  ABSL_UNREACHABLE();
 }
 
 std::ostream& operator<<(std::ostream& out, const FileFormat f) {
@@ -232,6 +234,7 @@ ReadModel(const absl::string_view file_path, const FileFormat format) {
       return std::make_pair(std::move(model), std::nullopt);
     }
   }
+  ABSL_UNREACHABLE();
 }
 
 absl::Status WriteModel(const absl::string_view file_path,
@@ -267,6 +270,7 @@ absl::Status WriteModel(const absl::string_view file_path,
       return file::SetContents(file_path, lp_data, file::Defaults());
     }
   }
+  ABSL_UNREACHABLE();
 }
 
 }  // namespace operations_research::math_opt

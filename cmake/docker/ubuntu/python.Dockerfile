@@ -10,11 +10,14 @@ RUN apt-get update -qq \
 && apt-get clean \
 && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 RUN python3 -m pip install --break-system-package \
- absl-py mypy mypy-protobuf
+ absl-py mypy mypy-protobuf typing-extensions
 
 FROM env AS devel
 WORKDIR /home/project
 COPY . .
+
+ARG CMAKE_BUILD_PARALLEL_LEVEL
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL:-4}
 
 FROM devel AS build
 RUN cmake -S. -Bbuild -DBUILD_PYTHON=ON -DBUILD_CXX_SAMPLES=OFF -DBUILD_CXX_EXAMPLES=OFF

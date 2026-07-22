@@ -15,6 +15,7 @@
 
 %{
 #include <vector>
+#include "absl/types/span.h"
 #include "ortools/base/types.h"
 %}
 
@@ -202,3 +203,24 @@ func swigCopy##name##SliceOut2d(s *[][]gonameim) [][]goname {
 
 VECTOR_AS_GO_SLICE(int, int, C.int)
 VECTOR_AS_GO_SLICE(int64_t, int64, int64)
+
+// absl::Span<const T> parameters map to Go slices the same way as
+// const std::vector<T>&: the slice is copied into a wrapper-local vector that
+// backs the span for the duration of the call. Must be instantiated after
+// VECTOR_AS_GO_SLICE(name, ...) since it reuses those helpers.
+%define SPAN_AS_GO_SLICE(name, goname, gonameim)
+%typemap(gotype) absl::Span<const name > "[]goname"
+#if "gonameim" != "goname"
+%typemap(imtype) absl::Span<const name > "[]gonameim"
+%typemap(goin) absl::Span<const name > %{
+    $result = swigCopy##name##SliceIn($input)
+%}
+#endif
+%typemap(in) absl::Span<const name > (std::vector< name > temp) %{
+    temp = name##SliceToVector($input);
+    $1 = absl::Span<const name >(temp);
+%}
+%enddef
+
+SPAN_AS_GO_SLICE(int, int, C.int)
+SPAN_AS_GO_SLICE(int64_t, int64, int64)

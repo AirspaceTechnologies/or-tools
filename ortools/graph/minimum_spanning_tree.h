@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_
-#define OR_TOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_
+#ifndef ORTOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_
+#define ORTOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_
 
 #include <limits>
 #include <vector>
@@ -50,7 +50,6 @@ BuildKruskalMinimumSpanningTreeFromSortedArcs(
     const Graph& graph,
     absl::Span<const typename Graph::ArcIndex> sorted_arcs) {
   using ArcIndex = typename Graph::ArcIndex;
-  using NodeIndex = typename Graph::NodeIndex;
   const int num_arcs = graph.num_arcs();
   int arc_index = 0;
   std::vector<ArcIndex> tree_arcs;
@@ -134,8 +133,11 @@ std::vector<typename Graph::ArcIndex> BuildPrimMinimumSpanningTree(
     int GetHeapIndex() const { return heap_index; }
     bool operator<(const Entry& other) const { return value > other.value; }
 
-    NodeIndex node;
+    // In the typical case, `NodeIndex` is 4 bytes, so having fields in this
+    // order is optimal in terms of memory usage and cache locality across all
+    // values of `sizeof(ArcValueType)`.
     ArcValueType value;
+    NodeIndex node;
     int heap_index;
   };
 
@@ -143,7 +145,9 @@ std::vector<typename Graph::ArcIndex> BuildPrimMinimumSpanningTree(
   std::vector<Entry> entries;
   std::vector<bool> touched_entry(graph.num_nodes(), false);
   for (NodeIndex node : graph.AllNodes()) {
-    entries.push_back({node, std::numeric_limits<ArcValueType>::max(), -1});
+    entries.push_back({.value = std::numeric_limits<ArcValueType>::max(),
+                       .node = node,
+                       .heap_index = -1});
   }
   entries[0].value = 0;
   pq.Add(&entries[0]);
@@ -177,4 +181,4 @@ std::vector<typename Graph::ArcIndex> BuildPrimMinimumSpanningTree(
 }
 
 }  // namespace operations_research
-#endif  // OR_TOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_
+#endif  // ORTOOLS_GRAPH_MINIMUM_SPANNING_TREE_H_

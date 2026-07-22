@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_SAT_SHAVING_SOLVER_H_
-#define OR_TOOLS_SAT_SHAVING_SOLVER_H_
+#ifndef ORTOOLS_SAT_SHAVING_SOLVER_H_
+#define ORTOOLS_SAT_SHAVING_SOLVER_H_
 
 #include <atomic>
 #include <cstdint>
@@ -23,6 +23,7 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
+#include "google/protobuf/arena.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_lns.h"
 #include "ortools/sat/cp_model_solver_helpers.h"
@@ -51,6 +52,7 @@ class ObjectiveShavingSolver : public SubSolver {
  private:
   std::string Info();
 
+  void ResetModel();
   bool ResetAndSolveModel(int64_t task_id);
 
   // This is fixed at construction.
@@ -64,7 +66,8 @@ class ObjectiveShavingSolver : public SubSolver {
 
   // Local singleton repository and presolved local model.
   std::unique_ptr<Model> local_sat_model_;
-  CpModelProto local_proto_;
+  std::unique_ptr<google::protobuf::Arena> arena_;
+  CpModelProto* local_proto_;
 
   // For postsolving a feasible solution or improving objective lb.
   std::vector<int> postsolve_mapping_;
@@ -82,10 +85,17 @@ class VariablesShavingSolver : public SubSolver {
   struct State {
     int var_index;
     bool minimize;
+
+    // We have two modes:
+    // - When "shave_using_objective" is true, we shave by minimizing the value
+    //   of a variable.
+    // - When false, we restrict its domain and detect feasible/infeasible.
     Domain reduced_domain;
+    bool shave_using_objective = false;
   };
 
   VariablesShavingSolver(const SatParameters& local_parameters,
+                         NeighborhoodGeneratorHelper* helper,
                          SharedClasses* shared);
 
   ~VariablesShavingSolver() override;
@@ -110,11 +120,12 @@ class VariablesShavingSolver : public SubSolver {
 
   bool FindNextVar(State* state) ABSL_SHARED_LOCKS_REQUIRED(mutex_);
 
-  void CopyModelConnectedToVar(State* state, Model* local_sat_model,
-                               CpModelProto* shaving_proto)
+  void CopyModelConnectedToVar(State* state, Model* local_model,
+                               CpModelProto* shaving_proto,
+                               bool* has_no_overlap_2d)
       ABSL_SHARED_LOCKS_REQUIRED(mutex_);
 
-  bool ResetAndSolveModel(int64_t task_id, State* state, Model* local_sat_model,
+  bool ResetAndSolveModel(int64_t task_id, State* state, Model* local_model,
                           CpModelProto* shaving_proto);
 
   // This is fixed at construction.
@@ -129,7 +140,7 @@ class VariablesShavingSolver : public SubSolver {
   const CpModelProto& model_proto_;
 
   absl::Mutex mutex_;
-  int current_index_ = -1;
+  int64_t current_index_ = -1;
   std::vector<Domain> var_domains_ ABSL_GUARDED_BY(mutex_);
 
   // Stats.
@@ -141,4 +152,4 @@ class VariablesShavingSolver : public SubSolver {
 }  // namespace sat
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_SAT_SHAVING_SOLVER_H_
+#endif  // ORTOOLS_SAT_SHAVING_SOLVER_H_

@@ -11,13 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_INIT_INIT_H_
-#define OR_TOOLS_INIT_INIT_H_
+#ifndef ORTOOLS_INIT_INIT_H_
+#define ORTOOLS_INIT_INIT_H_
 
 #include <cstdint>
 #include <string>
-#include <vector>
 
+#include "absl/strings/string_view.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/version.h"
 #include "ortools/sat/cp_model_solver_helpers.h"
@@ -86,7 +86,7 @@ class CppBridge {
    *
    * This must be called once before any other library from OR-Tools are used.
    */
-  static void InitLogging(const std::string& usage);
+  static void InitLogging(absl::string_view usage);
 
   /**
    * Shutdown the C++ logging layer.
@@ -111,7 +111,7 @@ class CppBridge {
    * You need to pass the full path, including the shared library file.
    * It returns true if the library was found and correctly loaded.
    */
-  static bool LoadGurobiSharedLibrary(const std::string& full_library_path);
+  static bool LoadGurobiSharedLibrary(absl::string_view full_library_path);
 
   /**
    * Delete a temporary C++ byte array.
@@ -152,4 +152,4 @@ class OrToolsVersion {
 
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_INIT_INIT_H_
+#endif  // ORTOOLS_INIT_INIT_H_

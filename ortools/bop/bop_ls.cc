@@ -649,6 +649,7 @@ void SatWrapper::BacktrackAll() { sat_solver_->Backtrack(0); }
 std::vector<sat::Literal> SatWrapper::FullSatTrail() const {
   std::vector<sat::Literal> propagated_literals;
   const sat::Trail& trail = sat_solver_->LiteralTrail();
+  propagated_literals.reserve(trail.Index());
   for (int trail_index = 0; trail_index < trail.Index(); ++trail_index) {
     propagated_literals.push_back(trail[trail_index]);
   }
@@ -665,7 +666,7 @@ int SatWrapper::ApplyDecision(sat::Literal decision_literal,
   const int old_decision_level = sat_solver_->CurrentDecisionLevel();
   const int new_trail_index =
       sat_solver_->EnqueueDecisionAndBackjumpOnConflict(decision_literal);
-  if (sat_solver_->IsModelUnsat()) {
+  if (sat_solver_->ModelIsUnsat()) {
     return old_decision_level + 1;
   }
 

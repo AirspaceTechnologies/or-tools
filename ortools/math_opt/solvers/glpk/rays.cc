@@ -14,7 +14,6 @@
 #include "ortools/math_opt/solvers/glpk/rays.h"
 
 #include <optional>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -24,8 +23,8 @@
 #include "absl/strings/str_cat.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/status_macros.h"
-#include "ortools/glpk/glpk_computational_form.h"
-#include "ortools/glpk/glpk_formatters.h"
+#include "ortools/third_party_solvers/glpk/glpk_computational_form.h"
+#include "ortools/third_party_solvers/glpk/glpk_formatters.h"
 
 namespace operations_research::math_opt {
 namespace {
@@ -376,7 +375,7 @@ absl::StatusOr<std::optional<GlpkRay>> GlpkComputeUnboundRay(
       ComputeFormVarStatus(problem,
                            /*num_cstrs=*/glp_get_num_rows(problem),
                            /*k=*/unbound_ray) == GLP_BS;
-  ASSIGN_OR_RETURN(const GlpkRay ray,
+  ASSIGN_OR_RETURN(GlpkRay ray,
                    (is_dual_ray ? ComputeDualRay(problem, unbound_ray)
                                 : ComputePrimalRay(problem, unbound_ray)));
   return ray;

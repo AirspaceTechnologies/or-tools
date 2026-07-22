@@ -28,12 +28,14 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
 #include "absl/flags/flag.h"
+#include "absl/log/globals.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/types/span.h"
 #include "ortools/base/init_google.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/types.h"
 #include "ortools/sat/cp_model.h"
 #include "ortools/sat/model.h"
@@ -96,6 +98,7 @@ void CostasHard(const int dim) {
   // create the variables
   std::vector<IntVar> vars;
   Domain domain(1, dim);
+  vars.reserve(dim);
   for (int i = 0; i < dim; ++i) {
     vars.push_back(
         cp_model.NewIntVar(domain).WithName(absl::StrCat("var_", i)));
@@ -297,7 +300,7 @@ void CostasBoolSoft(const int dim) {
 }  // namespace operations_research
 
 int main(int argc, char** argv) {
-  absl::SetFlag(&FLAGS_stderrthreshold, 0);
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
   InitGoogle(argv[0], &argc, &argv, true);
 
   int min = 1;

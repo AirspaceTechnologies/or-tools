@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_GLOP_UPDATE_ROW_H_
-#define OR_TOOLS_GLOP_UPDATE_ROW_H_
+#ifndef ORTOOLS_GLOP_UPDATE_ROW_H_
+#define ORTOOLS_GLOP_UPDATE_ROW_H_
 
 #include <cstdint>
 #include <string>
@@ -145,7 +145,6 @@ class UpdateRow {
   DenseRow coefficient_;
 
   // Boolean used to avoid recomputing many times the same thing.
-  bool compute_update_row_;
   RowIndex left_inverse_computed_for_ = kInvalidRow;
   RowIndex update_row_computed_for_ = kInvalidRow;
 
@@ -174,4 +173,4 @@ class UpdateRow {
 }  // namespace glop
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GLOP_UPDATE_ROW_H_
+#endif  // ORTOOLS_GLOP_UPDATE_ROW_H_

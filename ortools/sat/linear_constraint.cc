@@ -171,6 +171,17 @@ LinearExpression LinearConstraintBuilder::BuildExpression() {
   return result;
 }
 
+double LinearConstraint::NormalizedViolation(
+    const util_intops::StrongVector<IntegerVariable, double>& lp_values) const {
+  const double activity = ComputeActivity(*this, lp_values);
+  const double violation =
+      std::max(activity - ToDouble(ub), ToDouble(lb) - activity);
+  if (violation <= 0.0) return 0.0;
+
+  const double l2_norm = ComputeL2Norm(*this);
+  return violation / l2_norm;
+}
+
 double ComputeActivity(
     const LinearConstraint& constraint,
     const util_intops::StrongVector<IntegerVariable, double>& values) {
@@ -282,29 +293,6 @@ void DivideByGCD(LinearConstraint* constraint) {
   }
   for (int i = 0; i < constraint->num_terms; ++i) {
     constraint->coeffs[i] /= gcd;
-  }
-}
-
-void RemoveZeroTerms(LinearConstraint* constraint) {
-  int new_size = 0;
-  const int size = constraint->num_terms;
-  for (int i = 0; i < size; ++i) {
-    if (constraint->coeffs[i] == 0) continue;
-    constraint->vars[new_size] = constraint->vars[i];
-    constraint->coeffs[new_size] = constraint->coeffs[i];
-    ++new_size;
-  }
-  constraint->resize(new_size);
-}
-
-void MakeAllCoefficientsPositive(LinearConstraint* constraint) {
-  const int size = constraint->num_terms;
-  for (int i = 0; i < size; ++i) {
-    const IntegerValue coeff = constraint->coeffs[i];
-    if (coeff < 0) {
-      constraint->coeffs[i] = -coeff;
-      constraint->vars[i] = NegationOf(constraint->vars[i]);
-    }
   }
 }
 

@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_GLOP_REDUCED_COSTS_H_
-#define OR_TOOLS_GLOP_REDUCED_COSTS_H_
+#ifndef ORTOOLS_GLOP_REDUCED_COSTS_H_
+#define ORTOOLS_GLOP_REDUCED_COSTS_H_
 
 #include <string>
 #include <vector>
@@ -66,6 +66,8 @@ class ReducedCosts {
   // If this is true, then the caller must re-factorize the basis before the
   // next call to GetReducedCosts().
   bool NeedsBasisRefactorization() const;
+
+  void SetRandom(absl::BitGenRef random) { random_ = random; }
 
   // Checks the precision of the entering variable choice now that the direction
   // is computed. Returns its precise version. This will also trigger a
@@ -307,6 +309,8 @@ class PrimalPrices {
   // the basis during a primal simplex iterations.
   ColIndex GetBestEnteringColumn();
 
+  void SetRandom(absl::BitGenRef random) { prices_.SetRandom(random); }
+
   // Similar to the other UpdateBeforeBasisPivot() functions.
   //
   // Important: Both the primal norms and reduced costs must have been updated
@@ -343,4 +347,4 @@ class PrimalPrices {
 }  // namespace glop
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GLOP_REDUCED_COSTS_H_
+#endif  // ORTOOLS_GLOP_REDUCED_COSTS_H_

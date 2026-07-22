@@ -28,8 +28,11 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/log/vlog_is_on.h"
 #include "absl/numeric/int128.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -215,8 +218,8 @@ LinearConstraint ScatteredIntegerVector::ConvertToLinearConstraint(
   result.ub = upper_bound;
 
   if (extra_term != std::nullopt) {
-    result.vars[new_size] += extra_term->first;
-    result.coeffs[new_size] += extra_term->second;
+    result.vars[new_size] = extra_term->first;
+    result.coeffs[new_size] = extra_term->second;
     ++new_size;
   }
 
@@ -283,8 +286,8 @@ LinearProgrammingConstraint::LinearProgrammingConstraint(
       time_limit_(model->GetOrCreate<TimeLimit>()),
       integer_trail_(model->GetOrCreate<IntegerTrail>()),
       trail_(model->GetOrCreate<Trail>()),
+      sat_solver_(model->GetOrCreate<SatSolver>()),
       watcher_(model->GetOrCreate<GenericLiteralWatcher>()),
-      integer_encoder_(model->GetOrCreate<IntegerEncoder>()),
       product_detector_(model->GetOrCreate<ProductDetector>()),
       objective_definition_(model->GetOrCreate<ObjectiveDefinition>()),
       shared_stats_(model->GetOrCreate<SharedStatistics>()),
@@ -292,6 +295,8 @@ LinearProgrammingConstraint::LinearProgrammingConstraint(
       random_(model->GetOrCreate<ModelRandomGenerator>()),
       symmetrizer_(model->GetOrCreate<LinearConstraintSymmetrizer>()),
       linear_propagator_(model->GetOrCreate<LinearPropagator>()),
+      cover_cut_helper_(model),
+      integer_rounding_cut_helper_(model),
       rlt_cut_helper_(model),
       implied_bounds_processor_({}, integer_trail_,
                                 model->GetOrCreate<ImpliedBounds>()),
@@ -309,6 +314,8 @@ LinearProgrammingConstraint::LinearProgrammingConstraint(
     simplex_params_.set_change_status_to_imprecise(false);
   }
   simplex_.SetParameters(simplex_params_);
+  // Warning: SetRandom() must be called after SetParameters().
+  simplex_.SetRandom(*random_);
   if (parameters_.search_branching() == SatParameters::LP_SEARCH) {
     compute_reduced_cost_averages_ = true;
   }
@@ -317,11 +324,6 @@ LinearProgrammingConstraint::LinearProgrammingConstraint(
   integer_trail_->RegisterReversibleClass(&rc_rev_int_repository_);
   mirror_lp_variable_.resize(integer_trail_->NumIntegerVariables(),
                              glop::kInvalidCol);
-
-  // Register SharedStatistics with the cut helpers.
-  auto* stats = model->GetOrCreate<SharedStatistics>();
-  integer_rounding_cut_helper_.SetSharedStatistics(stats);
-  cover_cut_helper_.SetSharedStatistics(stats);
 
   // Initialize the IntegerVariable -> ColIndex mapping.
   CHECK(std::is_sorted(vars.begin(), vars.end()));
@@ -373,6 +375,16 @@ LinearProgrammingConstraint::LinearProgrammingConstraint(
       expanded_reduced_costs_.assign(max_index.value() + 1, 0.0);
     }
   }
+}
+
+LinearProgrammingConstraint::~LinearProgrammingConstraint() {
+  if (!VLOG_IS_ON(1)) return;
+  std::vector<std::pair<std::string, int64_t>> stats;
+  stats.push_back({"LinearProgrammingConstraint/num_root_level_skips",
+                   num_root_level_skips_});
+  stats.push_back({"LinearProgrammingConstraint/num_root_level_solves",
+                   num_root_level_solves_});
+  shared_stats_->AddStats(stats);
 }
 
 bool LinearProgrammingConstraint::AddLinearConstraint(LinearConstraint ct) {
@@ -721,6 +733,7 @@ void LinearProgrammingConstraint::FillLpData() {
     // Close column.
     data->CloseCurrentColumn();
   }
+  DCHECK_EQ(data->num_cols(), integer_lp_.size());
 
   // Fill and scale the objective.
   const glop::ColIndex num_cols_with_slacks(num_rows + num_cols);
@@ -858,12 +871,16 @@ bool LinearProgrammingConstraint::IncrementalPropagate(
     }
   }
 
-  if (!lp_solution_is_set_) {
+  if (!lp_solution_is_set_ || num_force_lp_call_on_next_propagate_ > 0) {
     return Propagate();
   }
 
   // At level zero, if there is still a chance to add cuts or lazy constraints,
   // we re-run the LP.
+  //
+  // TODO(user): I am not sure this does anything anymore because of
+  // AlwaysCallAtLevelZero() that might bypass IncrementalPropagate() completely
+  // if no variables changed.
   if (trail_->CurrentDecisionLevel() == 0 && !lp_at_level_zero_is_final_) {
     return Propagate();
   }
@@ -931,14 +948,15 @@ bool LinearProgrammingConstraint::SolveLp() {
   const double unscaling_factor = 1.0 / scaler_.ObjectiveScalingFactor();
   const double offset_before_unscaling =
       ToDouble(integer_objective_offset_) * scaler_.ObjectiveScalingFactor();
-  const auto status = simplex_.MinimizeFromTransposedMatrixWithSlack(
+  auto status = simplex_.MinimizeFromTransposedMatrixWithSlack(
       obj_with_slack_, unscaling_factor, offset_before_unscaling, time_limit_);
+  DCHECK_EQ(simplex_.GetProblemNumRows(), integer_lp_.size());
 
   // Lets resolve from scratch if we encounter this status.
   if (simplex_.GetProblemStatus() == glop::ProblemStatus::ABNORMAL) {
     VLOG(2) << "The LP solver returned abnormal, resolving from scratch";
     simplex_.ClearStateForNextSolve();
-    const auto status = simplex_.MinimizeFromTransposedMatrixWithSlack(
+    status = simplex_.MinimizeFromTransposedMatrixWithSlack(
         obj_with_slack_, unscaling_factor, offset_before_unscaling,
         time_limit_);
   }
@@ -1847,7 +1865,8 @@ void LinearProgrammingConstraint::AddMirCuts() {
     // But there is some degenerate problem where these rows have a really low
     // weight (or even zero), and having only weight of exactly zero in
     // std::discrete_distribution will result in a crash.
-    row_weights[row] = std::max(1e-8, std::abs(simplex_.GetDualValue(row)));
+    row_weights[row] =
+        std::max(Fractional(1e-8), std::abs(simplex_.GetDualValue(row)));
   }
 
   // The code here can be really slow, so we put a limit on the number of
@@ -1884,7 +1903,7 @@ void LinearProgrammingConstraint::AddMirCuts() {
     for (const ColIndex col : non_zeros_.PositionsSetAtLeastOnce()) {
       dense_cut[col] = IntegerValue(0);
     }
-    non_zeros_.SparseClearAll();
+    non_zeros_.ResetAllToFalse();
 
     // Copy cut.
     const LinearConstraintInternal& ct = integer_lp_[entry.first];
@@ -2120,8 +2139,46 @@ void LinearProgrammingConstraint::UpdateSimplexIterationLimit(
 }
 
 bool LinearProgrammingConstraint::Propagate() {
+  CHECK(!sat_solver_->ModelIsUnsat());
+
+  const int old_num_force = num_force_lp_call_on_next_propagate_;
+  num_force_lp_call_on_next_propagate_ = 0;
   if (!enabled_) return true;
   if (time_limit_->LimitReached()) return true;
+  const int64_t timestamp_at_function_start = integer_trail_->num_enqueues();
+
+  // Because of AlwaysCallAtLevelZero(), this function might be called many time
+  // at level zero in case of frequent restart, or if we just call Propagate()
+  // many time in a row. This could happen because most of the code assumes
+  // Propagate() is O(1) at fixed point.
+  //
+  // To alleviate any issue, we have some throttling in place, were we abort
+  // if the deterministic time spent after the last level zero "solve" is lower
+  // than the effort spent on that last solve.
+  //
+  // TODO(user): also use the logic of lp_at_level_zero_is_final_. If we don't
+  // have new info, there is no reason to rerun it. harder to make sure we
+  // don't miss anything though.
+  const double dtime_at_function_start =
+      time_limit_->GetElapsedDeterministicTime();
+  if (trail_->CurrentDecisionLevel() == 0 && old_num_force == 0) {
+    const double interval =
+        dtime_at_function_start - last_root_level_deterministic_time_;
+    if (last_root_level_deterministic_duration_ > interval) {
+      ++num_root_level_skips_;
+      return true;
+    }
+    ++num_root_level_solves_;
+  }
+  const auto cleanup = ::absl::MakeCleanup([dtime_at_function_start, this]() {
+    if (trail_->CurrentDecisionLevel() == 0) {
+      const double dtime_at_exit = time_limit_->GetElapsedDeterministicTime();
+      last_root_level_deterministic_time_ = dtime_at_exit;
+      last_root_level_deterministic_duration_ =
+          dtime_at_exit - dtime_at_function_start;
+    }
+  });
+
   UpdateBoundsOfLpVariables();
 
   // TODO(user): It seems the time we loose by not stopping early might be worth
@@ -2150,6 +2207,7 @@ bool LinearProgrammingConstraint::Propagate() {
   }
 
   simplex_.SetParameters(simplex_params_);
+  simplex_.SetRandom(*random_);
   if (!SolveLp()) return true;
   if (!AnalyzeLp()) return false;
 
@@ -2160,6 +2218,20 @@ bool LinearProgrammingConstraint::Propagate() {
   int cuts_round = 0;
   while (simplex_.GetProblemStatus() == glop::ProblemStatus::OPTIMAL &&
          cuts_round < max_cuts_rounds) {
+    // We are about to spend some effort finding cuts or changing the LP.
+    // If one of the LP solve done by this function propagated something, it
+    // seems better to reach the propagation fix point first before doing that.
+    //
+    // Heuristic: if we seem to be in a propagation loop, we might need more
+    // cut/lazy-constraints in order to just get out of it, so we loop only if
+    // num_force_lp_call_on_next_propagate_ is small.
+    if (integer_trail_->num_enqueues() > timestamp_at_function_start &&
+        old_num_force < 3) {
+      num_force_lp_call_on_next_propagate_ = old_num_force + 1;
+      watcher_->CallAgainDuringThisPropagation();
+      return true;
+    }
+
     // We wait for the first batch of problem constraints to be added before we
     // begin to generate cuts. Note that we rely on num_solves_ since on some
     // problems there is no other constraints than the cuts.
@@ -2194,9 +2266,7 @@ bool LinearProgrammingConstraint::Propagate() {
       if (level == 0 || !parameters_.only_add_cuts_at_level_zero()) {
         for (CutGenerator& generator : cut_generators_) {
           if (level > 0 && generator.only_run_at_level_zero) continue;
-          if (!generator.generate_cuts(&constraint_manager_)) {
-            return false;
-          }
+          if (!generator.generate_cuts(&constraint_manager_)) return false;
         }
       }
 
@@ -2209,6 +2279,7 @@ bool LinearProgrammingConstraint::Propagate() {
       ++num_lp_changes_;
       simplex_.LoadStateForNextSolve(state_);
       if (!CreateLpFromConstraintManager()) {
+        sat_solver_->NotifyThatModelIsUnsat();
         return integer_trail_->ReportConflict({});
       }
 
@@ -2221,6 +2292,7 @@ bool LinearProgrammingConstraint::Propagate() {
       const double old_obj = simplex_.GetObjectiveValue();
       if (!SolveLp()) return true;
       if (!AnalyzeLp()) return false;
+
       if (simplex_.GetProblemStatus() == glop::ProblemStatus::OPTIMAL) {
         VLOG(3) << "Relaxation improvement " << old_obj << " -> "
                 << simplex_.GetObjectiveValue()
@@ -2680,12 +2752,14 @@ bool LinearProgrammingConstraint::PropagateExactLpReason() {
     return explanation.ub >= 0;
   }
 
+  constraint_manager_.SetReducedCostsAsLinearConstraint(explanation);
   return PropagateLpConstraint(std::move(explanation));
 }
 
 bool LinearProgrammingConstraint::PropagateExactDualRay() {
   IntegerValue scaling;
   const glop::DenseColumn ray = simplex_.GetDualRay();
+  DCHECK_EQ(ray.size(), integer_lp_.size());
   tmp_lp_multipliers_.clear();
   for (RowIndex row(0); row < ray.size(); ++row) {
     const double value = ray[row];

@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_SAT_IMPLIED_BOUNDS_H_
-#define OR_TOOLS_SAT_IMPLIED_BOUNDS_H_
+#ifndef ORTOOLS_SAT_IMPLIED_BOUNDS_H_
+#define ORTOOLS_SAT_IMPLIED_BOUNDS_H_
 
 #include <algorithm>
 #include <array>
@@ -49,22 +49,21 @@ namespace sat {
 // have BoolVar => X >= bound, we can always lower bound the variable X by
 // (bound - X_lb) * BoolVar + X_lb, and that can lead to stronger cuts.
 struct ImpliedBoundEntry {
-  // An integer variable in [0, 1]. When at 1, then the IntegerVariable
+  // PositiveVariable(literal_view) is an integer variable in [0, 1].
+  // If VariableIsPositive(literal_view), when at 1, then the IntegerVariable
   // corresponding to this entry must be greater or equal to the given lower
   // bound.
+  //
+  // If !VariableIsPositive(literal_view) then it is when
+  // PositiveVariable(literal_view) is zero that the lower bound is valid.
   IntegerVariable literal_view = kNoIntegerVariable;
   IntegerValue lower_bound = IntegerValue(0);
 
-  // If false, it is when the literal_view is zero that the lower bound is
-  // valid.
-  bool is_positive = true;
-
   // These constructors are needed for OR-Tools.
-  ImpliedBoundEntry(IntegerVariable lit, IntegerValue lb, bool positive)
-      : literal_view(lit), lower_bound(lb), is_positive(positive) {}
+  ImpliedBoundEntry(IntegerVariable lit, IntegerValue lb)
+      : literal_view(lit), lower_bound(lb) {}
 
-  ImpliedBoundEntry()
-      : literal_view(kNoIntegerVariable), lower_bound(0), is_positive(true) {}
+  ImpliedBoundEntry() : literal_view(kNoIntegerVariable), lower_bound(0) {}
 };
 
 // Maintains all the implications of the form Literal => IntegerLiteral. We
@@ -133,6 +132,29 @@ class ImpliedBounds {
                                                 : empty_var_to_value_;
   }
 
+  // Returns [lb, ub] for a given variable implied by a literal.
+  // Returns [kMinIntegerValue, kMaxIntegerValue] if no such bounds exist.
+  std::pair<IntegerValue, IntegerValue> GetImpliedBounds(
+      Literal literal, IntegerVariable var) const {
+    std::pair<IntegerValue, IntegerValue> result = {kMinIntegerValue,
+                                                    kMaxIntegerValue};
+    const auto it = bounds_.find({literal.Index(), var});
+    if (it != bounds_.end()) {
+      result.first = it->second;
+    }
+    const auto it2 = bounds_.find({literal.Index(), NegationOf(var)});
+    if (it2 != bounds_.end()) {
+      result.second = -it2->second;
+    }
+    return result;
+  }
+
+  const absl::flat_hash_map<std::pair<LiteralIndex, IntegerVariable>,
+                            IntegerValue>&
+  GetModelImpliedBounds() const {
+    return bounds_;
+  }
+
   // Adds to the integer trail all the new level-zero deduction made here.
   // This can only be called at decision level zero. Returns false iff the model
   // is infeasible.
@@ -178,6 +200,8 @@ class ImpliedBounds {
   // Stats.
   int64_t num_deductions_ = 0;
   int64_t num_enqueued_in_var_to_bounds_ = 0;
+  int64_t num_promoted_to_equivalence_ = 0;
+  int max_changed_domain_complexity_ = 0;
 };
 
 class ElementEncodings {
@@ -401,4 +425,4 @@ class ProductDetector {
 }  // namespace sat
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_SAT_IMPLIED_BOUNDS_H_
+#endif  // ORTOOLS_SAT_IMPLIED_BOUNDS_H_

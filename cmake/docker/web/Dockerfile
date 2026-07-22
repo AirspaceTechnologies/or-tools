@@ -15,16 +15,20 @@ FROM env AS devel
 WORKDIR /home/project
 COPY . .
 
+ARG CMAKE_BUILD_PARALLEL_LEVEL
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL:-4}
+
 FROM devel AS build
 RUN emcmake cmake -S. -Bbuild \
  -DCMAKE_BUILD_TYPE=Release -DBUILD_DEPS=ON \
+ -DBUILD_TESTING=OFF \
  -DBUILD_EXAMPLES=OFF \
  -DUSE_COINOR=OFF \
  -DUSE_GLPK=OFF \
  -DUSE_HIGHS=OFF \
  -DUSE_PDLP=OFF \
  -DUSE_SCIP=OFF
-RUN cmake --build build --target all -v
+RUN cmake --build build --target all -v -j 4
 #RUN cmake --build build --target install -v
 
 FROM build AS test

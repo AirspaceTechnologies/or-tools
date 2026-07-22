@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_LP_DATA_MPS_READER_TEMPLATE_H_
-#define OR_TOOLS_LP_DATA_MPS_READER_TEMPLATE_H_
+#ifndef ORTOOLS_LP_DATA_MPS_READER_TEMPLATE_H_
+#define ORTOOLS_LP_DATA_MPS_READER_TEMPLATE_H_
 
 // A templated-reader for MPS (Mathematical Programming System) format.
 //
@@ -283,6 +283,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/ascii.h"
@@ -291,7 +292,6 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/status_macros.h"
 #include "ortools/util/filelineiter.h"
 
@@ -1254,4 +1254,4 @@ absl::StatusOr<bool> MPSReaderTemplate<DataWrapper>::GetBoolFromString(
 }
 
 }  //  namespace operations_research
-#endif  // OR_TOOLS_LP_DATA_MPS_READER_TEMPLATE_H_
+#endif  // ORTOOLS_LP_DATA_MPS_READER_TEMPLATE_H_

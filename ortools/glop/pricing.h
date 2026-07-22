@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_GLOP_PRICING_H_
-#define OR_TOOLS_GLOP_PRICING_H_
+#ifndef ORTOOLS_GLOP_PRICING_H_
+#define ORTOOLS_GLOP_PRICING_H_
 
 #include <cmath>
 #include <random>
@@ -75,6 +75,8 @@ class DynamicMaximum {
 
   // Removes the given index from the set of candidates.
   void Remove(Index position);
+
+  void SetRandom(absl::BitGenRef random) { random_ = random; }
 
   // Adds an element to the set of candidate and sets its value. If the element
   // is already present, this updates its value. The value must be finite.
@@ -350,4 +352,4 @@ inline void DynamicMaximum<Index>::UpdateTopK(Index position,
 }  // namespace glop
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GLOP_PRICING_H_
+#endif  // ORTOOLS_GLOP_PRICING_H_

@@ -88,8 +88,8 @@
 // implementation", PhD, Paderborn, Univ., 2005.
 // http://digital.ub.uni-paderborn.de/hs/download/pdf/3885?originalFilename=true
 
-#ifndef OR_TOOLS_GLOP_REVISED_SIMPLEX_H_
-#define OR_TOOLS_GLOP_REVISED_SIMPLEX_H_
+#ifndef ORTOOLS_GLOP_REVISED_SIMPLEX_H_
+#define ORTOOLS_GLOP_REVISED_SIMPLEX_H_
 
 #include <cstdint>
 #include <string>
@@ -248,6 +248,11 @@ class RevisedSimplex {
 
   void SetLogger(SolverLogger* logger) { logger_ = logger; }
 
+  // Note: SetParameters() calls SetRandom() on its implementation, so if you
+  // want to set the parameters and then set the random generator, you should
+  // call SetRandom() after SetParameters().
+  void SetRandom(absl::BitGenRef random);
+
   // Advanced usage. For fast incremental call to the solver, it is better not
   // to use LinearProgram at all. This api allows to directly modify the
   // internal data of glop and then call solve.
@@ -376,7 +381,7 @@ class RevisedSimplex {
   void DisplayRevisedSimplexDebugInfo();
 
   // Displays the Linear Programming problem as it was input.
-  void DisplayProblem() const;
+  void DisplayProblem();
 
   // Returns the current objective value. This is just the sum of the current
   // variable values times their current cost.
@@ -902,4 +907,4 @@ class RevisedSimplexDictionary {
 }  // namespace glop
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GLOP_REVISED_SIMPLEX_H_
+#endif  // ORTOOLS_GLOP_REVISED_SIMPLEX_H_

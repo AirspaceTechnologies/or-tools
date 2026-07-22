@@ -11,15 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_BASE_GZIPSTRING_H_
-#define OR_TOOLS_BASE_GZIPSTRING_H_
+#ifndef ORTOOLS_BASE_GZIPSTRING_H_
+#define ORTOOLS_BASE_GZIPSTRING_H_
+
+#include <zconf.h>
+#include <zlib.h>
 
 #include <string>
 
-#include "ortools/base/logging.h"
-#include "zlib.h"
+#include "absl/log/log.h"
+#include "absl/strings/string_view.h"
 
-bool GunzipString(absl::string_view str, std::string* out) {
+inline bool GunzipString(absl::string_view str, std::string* out) {
   z_stream zs;
   zs.zalloc = Z_NULL;
   zs.zfree = Z_NULL;
@@ -60,7 +63,8 @@ bool GunzipString(absl::string_view str, std::string* out) {
   return true;
 }
 
-bool GzipString(absl::string_view uncompressed, std::string* compressed) {
+inline bool GzipString(absl::string_view uncompressed,
+                       std::string* compressed) {
   z_stream zs;
   zs.zalloc = Z_NULL;
   zs.zfree = Z_NULL;
@@ -102,4 +106,4 @@ bool GzipString(absl::string_view uncompressed, std::string* compressed) {
   return true;
 }
 
-#endif  // OR_TOOLS_BASE_GZIPSTRING_H_
+#endif  // ORTOOLS_BASE_GZIPSTRING_H_

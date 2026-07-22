@@ -118,8 +118,8 @@
 // where number_of_nodes is the number of nodes in the TSP and cost_function
 // is a function returning the cost between two nodes.
 
-#ifndef OR_TOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
-#define OR_TOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
+#ifndef ORTOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
+#define ORTOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
 
 #include <cmath>
 #include <cstdint>
@@ -128,8 +128,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/types/span.h"
-#include "ortools/base/logging.h"
 #include "ortools/graph/christofides.h"
 #include "ortools/graph/graph.h"
 #include "ortools/graph/minimum_spanning_tree.h"
@@ -219,7 +219,7 @@ class HeldWolfeCrowderEvaluator {
     // bounds lead to faster convergence.
     ChristofidesPathSolver<CostType, int64_t, int, CostFunction> solver(
         number_of_nodes, cost);
-    upper_bound_ = solver.TravelingSalesmanCost();
+    upper_bound_ = solver.TravelingSalesmanCost().value();
   }
 
   bool Next() {
@@ -489,4 +489,4 @@ double ComputeOneTreeLowerBound(int number_of_nodes, const CostFunction& cost) {
 
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
+#endif  // ORTOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_

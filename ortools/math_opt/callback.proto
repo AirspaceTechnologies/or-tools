@@ -47,7 +47,8 @@ enum CallbackEventProto {
   // node). Useful for early termination. Note that this event does not provide
   // information on LP relaxations nor about new incumbent solutions.
   //
-  // This event is supported for MIP models by SOLVER_TYPE_GUROBI only.
+  // This event is fully supported for MIP models by SOLVER_TYPE_GUROBI only. If
+  // used with SOLVER_TYPE_CP_SAT, it is called when the dual bound is improved.
   CALLBACK_EVENT_MIP = 3;
 
   // Called every time a new MIP incumbent is found.
@@ -127,7 +128,8 @@ message CallbackDataProto {
   BarrierStats barrier_stats = 6;
 
   // MIP B&B stats. Only available during CALLBACK_EVENT_MIPxxxx events.
-  // Not supported for CP-SAT.
+  // When using CP-SAT, only primal_bound, dual_bound and
+  // number_of_solutions_found are populated.
   message MipStats {
     optional double primal_bound = 1;
     optional double dual_bound = 2;
@@ -158,7 +160,17 @@ message CallbackResultProto {
     bool is_lazy = 4;
   }
 
-  // Ends the solve early.
+  // When true it tells the solver to interrupt the solve as soon as possible.
+  //
+  // It can be set from any event. This is equivalent to using a
+  // SolveInterrupter and triggering it from the callback.
+  //
+  // Some solvers don't support interruption, in that case this is simply
+  // ignored and the solve terminates as usual. On top of that solvers may not
+  // immediately stop the solve. Thus the user should expect the callback to
+  // still be called after they set `terminate` to true in a previous
+  // call. Returning with `terminate` false after having previously returned
+  // true won't cancel the interruption.
   bool terminate = 1;
 
   // TODO(b/172214608): SCIP allows to reject a feasible solution without

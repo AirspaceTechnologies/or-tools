@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_GLOP_PRIMAL_EDGE_NORMS_H_
-#define OR_TOOLS_GLOP_PRIMAL_EDGE_NORMS_H_
+#ifndef ORTOOLS_GLOP_PRIMAL_EDGE_NORMS_H_
+#define ORTOOLS_GLOP_PRIMAL_EDGE_NORMS_H_
 
 #include <cstdint>
 #include <string>
@@ -203,7 +203,6 @@ class PrimalEdgeNorms {
   Stats stats_;
 
   // Booleans to control what happens on the next ChooseEnteringColumn() call.
-  bool must_refactorize_basis_;
   bool recompute_edge_squared_norms_;
   bool reset_devex_weights_;
 
@@ -239,4 +238,4 @@ class PrimalEdgeNorms {
 }  // namespace glop
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_GLOP_PRIMAL_EDGE_NORMS_H_
+#endif  // ORTOOLS_GLOP_PRIMAL_EDGE_NORMS_H_

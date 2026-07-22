@@ -67,6 +67,7 @@ export_meta
 ortools/bazel-*
 examples/bazel-*
 bazel-*
+user.bazelrc
 
 .vagrant/
 
@@ -97,8 +98,6 @@ ortools/dotnet/*/bin
 ortools/dotnet/*/obj
 ortools/**/samples/bin
 ortools/**/samples/obj
-examples/tests/bin
-examples/tests/obj
 examples/contrib/bin
 examples/contrib/obj
 examples/dotnet/bin
@@ -109,8 +108,7 @@ examples/dotnet/obj
 CMakeCache.txt
 CMakeFiles
 DartConfiguration.tcl
-*build*/*
-build/
+/build*/
 
 # Ignore Bzlmod lock file until it is more stable
 MODULE.bazel.lock

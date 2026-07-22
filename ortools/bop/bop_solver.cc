@@ -19,10 +19,10 @@
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
 #include "google/protobuf/text_format.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/threadpool.h"
 #include "ortools/bop/bop_base.h"
 #include "ortools/bop/bop_parameters.pb.h"
@@ -45,26 +45,6 @@ namespace {
 
 using ::operations_research::glop::ColIndex;
 using ::operations_research::glop::DenseRow;
-
-// Updates the problem_state when the solution is proved optimal or the problem
-// is proved infeasible.
-// Returns true when the problem_state has been changed.
-bool UpdateProblemStateBasedOnStatus(BopOptimizerBase::Status status,
-                                     ProblemState* problem_state) {
-  CHECK(nullptr != problem_state);
-
-  if (BopOptimizerBase::OPTIMAL_SOLUTION_FOUND == status) {
-    problem_state->MarkAsOptimal();
-    return true;
-  }
-
-  if (BopOptimizerBase::INFEASIBLE == status) {
-    problem_state->MarkAsInfeasible();
-    return true;
-  }
-
-  return false;
-}
 }  // anonymous namespace
 
 //------------------------------------------------------------------------------
@@ -167,6 +147,7 @@ BopSolveStatus BopSolver::SolveWithTimeLimit(const BopSolution& first_solution,
     VLOG(1)
         << "First solution is infeasible. Using it as assignment preference.";
     std::vector<bool> assignment_preference;
+    assignment_preference.reserve(first_solution.Size());
     for (int i = 0; i < first_solution.Size(); ++i) {
       assignment_preference.push_back(first_solution.Value(VariableIndex(i)));
     }

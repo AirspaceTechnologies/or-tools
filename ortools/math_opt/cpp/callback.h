@@ -66,8 +66,8 @@
 // not). You should either solve with one thread (see
 // solver_parameters.threads), write a threadsafe callback, or consult
 // the documentation of your underlying solver.
-#ifndef OR_TOOLS_MATH_OPT_CPP_CALLBACK_H_
-#define OR_TOOLS_MATH_OPT_CPP_CALLBACK_H_
+#ifndef ORTOOLS_MATH_OPT_CPP_CALLBACK_H_
+#define ORTOOLS_MATH_OPT_CPP_CALLBACK_H_
 
 #include <functional>
 #include <optional>
@@ -76,11 +76,12 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/time/time.h"
-#include "absl/types/span.h"
 #include "ortools/math_opt/callback.pb.h"
 #include "ortools/math_opt/cpp/enums.h"  // IWYU pragma: export
 #include "ortools/math_opt/cpp/map_filter.h"
+#include "ortools/math_opt/cpp/model.h"
 #include "ortools/math_opt/cpp/variable_and_expressions.h"
 #include "ortools/math_opt/storage/model_storage.h"
 
@@ -108,7 +109,9 @@ enum class CallbackEvent {
   // node). Useful for early termination. Note that this event does not provide
   // information on LP relaxations nor about new incumbent solutions.
   //
-  // This event is supported for MIP models with SolverType::kGurobi only.
+  // This event is fully supported for MIP models with SolverType::kGurobi only.
+  // If used with SolverType::kCpSat, it is called when the dual bound is
+  // improved.
   kMip = CALLBACK_EVENT_MIP,
 
   // Called every time a new MIP incumbent is found.
@@ -142,9 +145,16 @@ MATH_OPT_DEFINE_ENUM(CallbackEvent, CALLBACK_EVENT_UNSPECIFIED);
 //   * what information the callback needs,
 //   * how the callback might alter the solve process.
 struct CallbackRegistration {
+  // Returns the CallbackRegistration equivalent to the proto.
+  //
+  // Returns an error if filters indices don't match existing variables or if
+  // events have incorrect values.
+  static absl::StatusOr<CallbackRegistration> FromProto(
+      const Model& model, const CallbackRegistrationProto& registration_proto);
+
   // Returns a failure if the referenced variables don't belong to the input
   // expected_storage (which must not be nullptr).
-  absl::Status CheckModelStorage(const ModelStorage* expected_storage) const;
+  absl::Status CheckModelStorage(ModelStorageCPtr expected_storage) const;
 
   // Returns the proto equivalent of this object.
   //
@@ -189,7 +199,17 @@ struct CallbackData {
 
   // Users will typically not need this function.
   // Will CHECK fail if proto is not valid.
-  CallbackData(const ModelStorage* storage, const CallbackDataProto& proto);
+  CallbackData(ModelStorageCPtr storage, const CallbackDataProto& proto);
+
+  // Returns a failure if the referenced variables don't belong to the input
+  // expected_storage (which must not be nullptr).
+  absl::Status CheckModelStorage(ModelStorageCPtr expected_storage) const;
+
+  // Returns the proto equivalent of this object.
+  //
+  // The caller should use CheckModelStorage() as this function does not check
+  // internal consistency of the referenced variables.
+  absl::StatusOr<CallbackDataProto> Proto() const;
 
   // The current state of the underlying solver.
   CallbackEvent event;
@@ -229,7 +249,7 @@ struct CallbackResult {
     BoundedLinearExpression linear_constraint;
     bool is_lazy = false;
 
-    const ModelStorage* storage() const {
+    NullableModelStorageCPtr storage() const {
       return linear_constraint.expression.storage();
     }
   };
@@ -247,9 +267,16 @@ struct CallbackResult {
     new_constraints.push_back({std::move(linear_constraint), true});
   }
 
+  // Returns the CallbackResult equivalent to the proto.
+  //
+  // Returns an error if constraints or solutions indices don't match existing
+  // variables.
+  static absl::StatusOr<CallbackResult> FromProto(
+      const Model& model, const CallbackResultProto& result_proto);
+
   // Returns a failure if the referenced variables don't belong to the input
   // expected_storage (which must not be nullptr).
-  absl::Status CheckModelStorage(const ModelStorage* expected_storage) const;
+  absl::Status CheckModelStorage(ModelStorageCPtr expected_storage) const;
 
   // Returns the proto equivalent of this object.
   //
@@ -257,7 +284,17 @@ struct CallbackResult {
   // internal consistency of the referenced variables.
   CallbackResultProto Proto() const;
 
-  // Stop the solve process and return early. Can be called from any event.
+  // When true it tells the solver to interrupt the solve as soon as possible.
+  //
+  // It can be set from any event. This is equivalent to using a
+  // SolveInterrupter and triggering it from the callback.
+  //
+  // Some solvers don't support interruption, in that case this is simply
+  // ignored and the solve terminates as usual. On top of that solvers may not
+  // immediately stop the solve. Thus the user should expect the callback to
+  // still be called after they set `terminate` to true in a previous
+  // call. Returning with `terminate` false after having previously returned
+  // true won't cancel the interruption.
   bool terminate = false;
 
   // The user cuts and lazy constraints added. Prefer AddUserCut() and
@@ -271,4 +308,4 @@ struct CallbackResult {
 }  // namespace math_opt
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_MATH_OPT_CPP_CALLBACK_H_
+#endif  // ORTOOLS_MATH_OPT_CPP_CALLBACK_H_

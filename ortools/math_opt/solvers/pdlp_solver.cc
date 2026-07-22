@@ -24,6 +24,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"
+#include "absl/log/log.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -32,7 +34,6 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/protoutil.h"
 #include "ortools/base/status_macros.h"
 #include "ortools/math_opt/callback.pb.h"
@@ -336,7 +337,7 @@ absl::StatusOr<SolveResultProto> PdlpSolver::Solve(
     const ModelSolveParametersProto& model_parameters,
     const MessageCallback message_cb,
     const CallbackRegistrationProto& callback_registration, const Callback,
-    const SolveInterrupter* const interrupter) {
+    const SolveInterrupter* absl_nullable const interrupter) {
   RETURN_IF_ERROR(ModelSolveParametersAreSupported(
       model_parameters, kPdlpSupportedStructures, "PDLP"));
   RETURN_IF_ERROR(CheckRegisteredCallbackEvents(callback_registration,
@@ -381,7 +382,7 @@ absl::StatusOr<bool> PdlpSolver::Update(const ModelUpdateProto&) {
 absl::StatusOr<ComputeInfeasibleSubsystemResultProto>
 PdlpSolver::ComputeInfeasibleSubsystem(const SolveParametersProto&,
                                        MessageCallback,
-                                       const SolveInterrupter*) {
+                                       const SolveInterrupter* absl_nullable) {
   return absl::UnimplementedError(
       "PDLP does not provide a method to compute an infeasible subsystem");
 }

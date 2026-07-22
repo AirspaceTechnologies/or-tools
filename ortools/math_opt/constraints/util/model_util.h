@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_MATH_OPT_CONSTRAINTS_UTIL_MODEL_UTIL_H_
-#define OR_TOOLS_MATH_OPT_CONSTRAINTS_UTIL_MODEL_UTIL_H_
+#ifndef ORTOOLS_MATH_OPT_CONSTRAINTS_UTIL_MODEL_UTIL_H_
+#define ORTOOLS_MATH_OPT_CONSTRAINTS_UTIL_MODEL_UTIL_H_
 
 #include <vector>
 
@@ -52,7 +52,7 @@ std::vector<Variable> AtomicConstraintNonzeroVariables(
 }
 
 // Duck-types on `ConstraintType` having a typedef for the associated `IdType`,
-// and having a `(const ModelStorage*, IdType)` constructor.
+// and having a `(ModelStorageCPtr, IdType)` constructor.
 template <typename ConstraintType>
 std::vector<ConstraintType> AtomicConstraints(const ModelStorage& storage) {
   using IdType = typename ConstraintType::IdType;
@@ -79,4 +79,4 @@ std::vector<ConstraintType> SortedAtomicConstraints(
 
 }  // namespace operations_research::math_opt
 
-#endif  // OR_TOOLS_MATH_OPT_CONSTRAINTS_UTIL_MODEL_UTIL_H_
+#endif  // ORTOOLS_MATH_OPT_CONSTRAINTS_UTIL_MODEL_UTIL_H_

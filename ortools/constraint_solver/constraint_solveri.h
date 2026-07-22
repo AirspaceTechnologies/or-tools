@@ -11,43 +11,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Collection of objects used to extend the Constraint Solver library.
-///
-/// This file contains a set of objects that simplifies writing extensions
-/// of the library.
-///
-/// The main objects that define extensions are:
-///   - BaseIntExpr, the base class of all expressions that are not variables.
-///   - SimpleRevFIFO, a reversible FIFO list with templatized values.
-///     A reversible data structure is a data structure that reverts its
-///     modifications when the search is going up in the search tree, usually
-///     after a failure occurs.
-///   - RevImmutableMultiMap, a reversible immutable multimap.
-///   - MakeConstraintDemon<n> and MakeDelayedConstraintDemon<n> to wrap methods
-///     of a constraint as a demon.
-///   - RevSwitch, a reversible flip-once switch.
-///   - SmallRevBitSet, RevBitSet, and RevBitMatrix: reversible 1D or 2D
-///     bitsets.
-///   - LocalSearchOperator, IntVarLocalSearchOperator, ChangeValue and
-///     PathOperator, to create new local search operators.
-///   - LocalSearchFilter and IntVarLocalSearchFilter, to create new local
-///     search filters.
-///   - BaseLns, to write Large Neighborhood Search operators.
-///   - SymmetryBreaker, to describe model symmetries that will be broken during
-///     search using the 'Symmetry Breaking During Search' framework
-///     see Gent, I. P., Harvey, W., & Kelsey, T. (2002).
-///     Groups and Constraints: Symmetry Breaking During Search.
-///     Principles and Practice of Constraint Programming CP2002
-///     (Vol. 2470, pp. 415-430). Springer. Retrieved from
-///     http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.11.1442.
-///
-/// Then, there are some internal classes that are used throughout the solver
-/// and exposed in this file:
-///   - SearchLog, the root class of all periodic outputs during search.
-///   - ModelCache, A caching layer to avoid creating twice the same object.
+/** @file constraint_solveri.h
+Collection of objects used to extend the Constraint Solver library.
 
-#ifndef OR_TOOLS_CONSTRAINT_SOLVER_CONSTRAINT_SOLVERI_H_
-#define OR_TOOLS_CONSTRAINT_SOLVER_CONSTRAINT_SOLVERI_H_
+This file contains a set of objects that simplifies writing extensions
+of the library.
+
+The main objects that define extensions are:
+  - BaseIntExpr, the base class of all expressions that are not variables.
+  - SimpleRevFIFO, a reversible FIFO list with templatized values.
+    A reversible data structure is a data structure that reverts its
+    modifications when the search is going up in the search tree, usually
+    after a failure occurs.
+  - RevImmutableMultiMap, a reversible immutable multimap.
+  - MakeConstraintDemon<n> and MakeDelayedConstraintDemon<n> to wrap methods
+    of a constraint as a demon.
+  - RevSwitch, a reversible flip-once switch.
+  - SmallRevBitSet, RevBitSet, and RevBitMatrix: reversible 1D or 2D
+    bitsets.
+  - LocalSearchOperator, IntVarLocalSearchOperator, ChangeValue and
+    PathOperator, to create new local search operators.
+  - LocalSearchFilter and IntVarLocalSearchFilter, to create new local
+    search filters.
+  - BaseLns, to write Large Neighborhood Search operators.
+  - SymmetryBreaker, to describe model symmetries that will be broken during
+    search using the 'Symmetry Breaking During Search' framework
+    see Gent, I. P., Harvey, W., & Kelsey, T. (2002).
+    Groups and Constraints: Symmetry Breaking During Search.
+    Principles and Practice of Constraint Programming CP2002
+    (Vol. 2470, pp. 415-430). Springer. Retrieved from
+    http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.11.1442.
+
+Then, there are some internal classes that are used throughout the solver
+and exposed in this file:
+  - SearchLog, the root class of all periodic outputs during search.
+  - ModelCache, A caching layer to avoid creating twice the same object.
+*/
+
+#ifndef ORTOOLS_CONSTRAINT_SOLVER_CONSTRAINT_SOLVERI_H_
+#define ORTOOLS_CONSTRAINT_SOLVER_CONSTRAINT_SOLVERI_H_
 
 #include <stdint.h>
 #include <string.h>
@@ -68,6 +70,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
+#include "ortools/base/base_export.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/strong_int.h"
 #include "ortools/base/strong_vector.h"
@@ -430,7 +433,6 @@ class SmallRevBitSet {
 class RevBitSet {
  public:
   explicit RevBitSet(int64_t size);
-  ~RevBitSet();
 
   /// Sets the 'index' bit.
   void SetToOne(Solver* solver, int64_t index);
@@ -457,8 +459,8 @@ class RevBitSet {
   void Save(Solver* solver, int offset);
   const int64_t size_;
   const int64_t length_;
-  uint64_t* bits_;
-  uint64_t* stamps_;
+  std::unique_ptr<uint64_t[]> bits_;
+  std::unique_ptr<uint64_t[]> stamps_;
 };
 
 /// Matrix version of the RevBitSet class.
@@ -1038,14 +1040,14 @@ class LocalSearchOperatorState {
       }
       committed_is_active_.CopyBucket(candidate_is_active_, index);
     }
-    changes_.SparseClearAll();
-    incremental_changes_.SparseClearAll();
+    changes_.ResetAllToFalse();
+    incremental_changes_.ResetAllToFalse();
   }
 
   void CheckPoint() { checkpoint_values_ = committed_values_; }
 
   void Revert(bool only_incremental) {
-    incremental_changes_.SparseClearAll();
+    incremental_changes_.ResetAllToFalse();
     if (only_incremental) return;
 
     for (const int64_t index : changes_.PositionsSetAtLeastOnce()) {
@@ -1056,7 +1058,7 @@ class LocalSearchOperatorState {
       }
       candidate_is_active_.CopyBucket(committed_is_active_, index);
     }
-    changes_.SparseClearAll();
+    changes_.ResetAllToFalse();
   }
 
   const std::vector<int64_t>& CandidateIndicesChanged() const {
@@ -1515,7 +1517,7 @@ class BaseNodeIterators {
 template <bool ignore_path_vars>
 class PathOperator : public IntVarLocalSearchOperator {
  public:
-  /// Set of parameters used to configure how the neighnorhood is traversed.
+  /// Set of parameters used to configure how the neighborhood is traversed.
   struct IterationParameters {
     /// Number of nodes needed to define a neighbor.
     int number_of_base_nodes;
@@ -1986,7 +1988,7 @@ class PathOperator : public IntVarLocalSearchOperator {
                                 int default_value) {
     const int node = node_iterator->GetValue();
     return node >= 0 ? node : default_value;
-    }
+  }
 
   void OnStart() override {
     optimal_paths_enabled_ = false;
@@ -1994,7 +1996,7 @@ class PathOperator : public IntVarLocalSearchOperator {
       iterators_initialized_ = true;
       for (int i = 0; i < iteration_parameters_.number_of_base_nodes; ++i) {
         base_node_iterators_[i].Initialize();
-    }
+      }
     }
     InitializeBaseNodes();
     InitializeAlternatives();
@@ -2331,7 +2333,7 @@ class PathOperator : public IntVarLocalSearchOperator {
   class ActivePaths {
    public:
     explicit ActivePaths(int num_nodes) : start_to_path_(num_nodes, -1) {}
-    void Clear() { is_path_pair_active_.clear(); }
+    void Clear() { to_reset_ = true; }
     template <typename T>
     void Initialize(T is_start) {
       if (is_path_pair_active_.empty()) {
@@ -2343,14 +2345,15 @@ class PathOperator : public IntVarLocalSearchOperator {
             ++num_paths_;
           }
         }
-        is_path_pair_active_.resize(num_paths_ * num_paths_, true);
       }
     }
     void DeactivatePathPair(int start1, int start2) {
+      if (to_reset_) Reset();
       is_path_pair_active_[start_to_path_[start1] * num_paths_ +
                            start_to_path_[start2]] = false;
     }
     void ActivatePath(int start) {
+      if (to_reset_) Reset();
       const int p1 = start_to_path_[start];
       const int p1_block = num_paths_ * p1;
       for (int p2 = 0; p2 < num_paths_; ++p2) {
@@ -2362,11 +2365,19 @@ class PathOperator : public IntVarLocalSearchOperator {
       }
     }
     bool IsPathPairActive(int start1, int start2) const {
+      if (to_reset_) return true;
       return is_path_pair_active_[start_to_path_[start1] * num_paths_ +
                                   start_to_path_[start2]];
     }
 
    private:
+    void Reset() {
+      if (!to_reset_) return;
+      is_path_pair_active_.assign(num_paths_ * num_paths_, true);
+      to_reset_ = false;
+    }
+
+    bool to_reset_ = true;
     int num_paths_ = 0;
     std::vector<int64_t> start_to_path_;
     std::vector<bool> is_path_pair_active_;
@@ -4352,4 +4363,4 @@ std::vector<int64_t> ToInt64Vector(const std::vector<int>& input);
 
 }  // namespace operations_research
 
-#endif  // OR_TOOLS_CONSTRAINT_SOLVER_CONSTRAINT_SOLVERI_H_
+#endif  // ORTOOLS_CONSTRAINT_SOLVER_CONSTRAINT_SOLVERI_H_

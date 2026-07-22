@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OR_TOOLS_MATH_OPT_CONSTRAINTS_SOS_STORAGE_H_
-#define OR_TOOLS_MATH_OPT_CONSTRAINTS_SOS_STORAGE_H_
+#ifndef ORTOOLS_MATH_OPT_CONSTRAINTS_SOS_STORAGE_H_
+#define ORTOOLS_MATH_OPT_CONSTRAINTS_SOS_STORAGE_H_
 
 #include <cstdint>
 #include <optional>
@@ -43,6 +43,7 @@ class SosConstraintData {
   using IdType = ConstraintId;
   using ProtoType = SosConstraintProto;
   using UpdatesProtoType = SosConstraintUpdatesProto;
+  static constexpr bool kSupportsElemental = false;
 
   static_assert(
       std::disjunction_v<std::is_same<ConstraintId, Sos1ConstraintId>,
@@ -101,11 +102,13 @@ using Sos2ConstraintData = internal::SosConstraintData<Sos2ConstraintId>;
 template <>
 struct AtomicConstraintTraits<Sos1ConstraintId> {
   using ConstraintData = Sos1ConstraintData;
+  static constexpr bool kSupportsElemental = false;
 };
 
 template <>
 struct AtomicConstraintTraits<Sos2ConstraintId> {
   using ConstraintData = Sos2ConstraintData;
+  static constexpr bool kSupportsElemental = false;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -172,4 +175,4 @@ void SosConstraintData<ConstraintId>::DeleteVariable(const VariableId var) {
 }  // namespace internal
 }  // namespace operations_research::math_opt
 
-#endif  // OR_TOOLS_MATH_OPT_CONSTRAINTS_SOS_STORAGE_H_
+#endif  // ORTOOLS_MATH_OPT_CONSTRAINTS_SOS_STORAGE_H_
