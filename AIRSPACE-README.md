@@ -5,11 +5,17 @@ It has Go bindings and binaries for use with Go projects.
 
 ## Install (Mac)
  1. Download binaries for Mac:
-    `https://github.com/AirspaceTechnologies/or-tools/releases/download/v9.12-go1.24.3/or-tools_universal_macOS-14.6.1_go_v9.12.4602.tar.gz`
+    `https://github.com/AirspaceTechnologies/or-tools/releases/download/v9.15-go1.26.5/or-tools_universal_macOS-26.1_go_v9.15.6826.tar.gz`
  1. Install/extract to `/usr/local/lib`:
-    `sudo tar -xf or-tools_universal_macOS-14.6.1_go_v9.12.4602.tar.gz --strip 1 -C /usr/local/lib`
+    `sudo tar -xf or-tools_universal_macOS-26.1_go_v9.15.6826.tar.gz --strip 1 -C /usr/local/lib`
  1. Clean module download cache if necessary:
     `go clean --modcache`
+
+## Install (Linux)
+ 1. Download binaries for the host architecture (`x86_64` or `aarch64`), e.g.:
+    `https://github.com/AirspaceTechnologies/or-tools/releases/download/v9.15-go1.26.5/or-tools_x86_64_AlmaLinux-8.10_go_v9.15.6826.tar.gz`
+ 1. Install/extract to `/usr/local/lib`:
+    `tar -xf or-tools_x86_64_AlmaLinux-8.10_go_v9.15.6826.tar.gz --strip 1 -C /usr/local/lib && ldconfig`
 
 ## Install to a Custom Location (Mac)
  By default, the Mac binary releases embed an absolute install path (`/usr/local/lib`).
@@ -29,11 +35,15 @@ It has Go bindings and binaries for use with Go projects.
   1. Install XCode:
      `xcode-select --install`
   1. Install C++ tools:
-     `brew install cmake wget pkg-config`
-  1. Install SWIG 4.3.1:
-     `brew install swig` (or `brew upgrade swig`)
-  1. Install protobuf for Go:
-     `$ go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33`
+     `brew install wget pkg-config`
+  1. Install CMake `3.31.x` to match the release images:
+     download the installer from https://github.com/Kitware/CMake/releases/tag/v3.31.2
+     or keep a parallel copy on `PATH` for or-tools builds
+  1. Install SWIG `4.3.1` (match version pinned in `tools/release/*_airspace.Dockerfile`):
+     `brew install swig`
+  1. Install Go matching the release toolchain (see the release tag, e.g. `1.26.5`)
+  1. Install protobuf for Go (match the Dockerfile pin):
+     `$ go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10`
   1. Clone Airspace OR-tools:
      `git clone git@github.com:AirspaceTechnologies/or-tools.git`
 </details>
@@ -46,9 +56,11 @@ It has Go bindings and binaries for use with Go projects.
   1. Create universal Mac binaries:
      `sh universal.sh -a [arm64 tar ball] -x [x86_64 tar ball] -o [output tar ball]`
 
-     For example: `sh universal.sh -a export/or-tools_arm64_macOS-14.6.1_go_v9.12.4602.tar.gz -x export/or-tools_x86_64_macOS-14.6.1_go_v9.12.4602.tar.gz -o export/or-tools_universal_macOS-14.6.1_go_v9.12.4602.tar.gz`
-  1. For Linux x86_64 (takes ~45 mins, uses Docker to build everything from scratch):
-     `sh tools/release/build_delivery_airspace.sh`
+     For example: `sh universal.sh -a export/or-tools_arm64_macOS-26.1_go_v9.15.6826.tar.gz -x export/or-tools_x86_64_macOS-26.1_go_v9.15.6826.tar.gz -o export/or-tools_universal_macOS-26.1_go_v9.15.6826.tar.gz`
+  1. For Linux x86_64 (~1 hour natively, uses Docker to build everything from scratch):
+     `sh tools/release/build_delivery_airspace.sh go amd64`
+  1. For Linux aarch64:
+     `sh tools/release/build_delivery_airspace.sh go arm64`
   1. Log into Github and create a release with the resulting binaries in the `export` directory
 
 ### Update Fork from Upstream
@@ -62,13 +74,13 @@ It has Go bindings and binaries for use with Go projects.
     `git merge upstream/stable`
  1. Push fork's `stable` branch:
     `git push`
- 1. Checkout fork's `airspace` branch and pull:
-    `git checkout airspace && git pull`
- 1. Merge changes from `stable` to `airspace` branch:
+ 1. Create a cycle branch off fork's `airspace` branch:
+    `git checkout airspace && git pull && git checkout -b airspace-vX.Y`
+ 1. Merge changes from `stable` into the cycle branch:
     `git merge stable`
- 1. Push fork's `airspace` branch:
-    `git push`
- 1. Optionally build and release using steps above
+ 1. Push the cycle branch and open a PR into `airspace`:
+    `git push -u origin airspace-vX.Y`
+ 1. Build and release using steps above
 
 ## TODO
  1. Make `IntVar`->`IntExpr` casting cleaner

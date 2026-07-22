@@ -9,8 +9,8 @@ live in `AIRSPACE-README.md`. No scoped `<dir>/AGENTS.md` files exist yet; if th
 release tooling or Go binding layer accumulates its own non-obvious detail, scope it
 there.
 
-> Facts below verified against the `airspace` branch at tag `v9.12-go1.24.3`
-> (2026-07-20). Line numbers cited are as of that tag and will drift after merges.
+> Facts below verified against the `airspace` branch at tag `v9.15-go1.26.5`
+> (2026-07-22). Line numbers cited are as of that tag and will drift after merges.
 
 ## Maintaining AGENTS.md files
 
@@ -72,8 +72,9 @@ runbooks and are intentionally not documented in this public fork.
 
 ## What a release tarball contains
 
-Only the compiled shared libraries: `lib/libgoortools.*` and `lib/libortools.*`
-plus version symlinks (packed by `native.sh` from the CMake build dir). No headers,
+Only the compiled shared libraries: `libgoortools.*` and `libortools.*` plus
+version symlinks, under a `lib/` (Mac) or `lib64/` (Linux) top dir that install
+steps strip (packed by `native.sh` from the CMake build dir). No headers,
 no `.go` files, no dependency libs: third-party deps (protobuf, abseil, ...) are
 **statically linked into** those libs via the airspace patch in
 `cmake/dependencies/CMakeLists.txt` (commit `8c706cc426`). The generated Go wrapper
@@ -84,48 +85,88 @@ which is what consumers import as a Go module.
 
 | Script | Purpose |
 |---|---|
-| `native.sh` | Native build + tarball for the host (`--fast` skips CMake regen). Arch-agnostic: everything keys off `uname -m`. |
-| `arm.sh` | Mac arm64 cross-compile from an x86_64 Mac host (wraps `tools/cross_compile.sh`). |
+| `native.sh` | Native build + tarball for the host (`--fast` skips CMake regen). Arch-agnostic: everything keys off `uname -m`. Honors `GO_TEST_RACE` (default ON). |
+| `arm.sh` | Mac arm64 cross-compile from an x86_64 Mac host (wraps `tools/cross_compile.sh`). Compile-only verification: the qemu/test steps are commented out, so the arm64 Mac libs are first executed by consumers on Apple Silicon. |
 | `universal.sh` | `lipo` two Mac tarballs (`-a` arm64, `-x` x86_64) into one universal tarball (`-o`). |
-| `tools/release/build_delivery_airspace.sh` | Linux delivery via Docker (~45 min): builds `tools/release/amd64_airspace.Dockerfile` (env → devel → delivery stages; delivery runs `native.sh` in-container) and copies tarballs to `export/`. |
+| `tools/release/build_delivery_airspace.sh` | Linux delivery via Docker: `<script> go <amd64\|arm64>` selects `amd64_airspace.Dockerfile` or `aarch64_airspace.Dockerfile` (env → devel → delivery stages; delivery runs `native.sh` in-container) and copies tarballs to `export/`. Auto-disables `go test -race` when the target arch differs from the host (QEMU cannot run TSan). |
 
 Everything else under `tools/release/` (`build_delivery_linux.sh`,
 `*_manylinux_*.sh`, `amd64.Dockerfile`, `arm64.Dockerfile`, publish/test scripts,
-encrypted secrets) is **upstream's tooling, unused** by the airspace flow, but
-useful as reference (upstream's `arm64.Dockerfile` shows the manylinux_2_28_aarch64
-setup).
+encrypted secrets) is **upstream's tooling, unused** by the airspace flow.
+The `*_airspace.Dockerfile`s pin CMake, SWIG, Go, and protoc-gen-go explicitly:
+the manylinux `:latest` images silently drift their preinstalled toolchains, and
+the container SWIG must match the SWIG that regenerates the committed `go/` tree.
 
 ## Airspace patches that MUST survive upstream merges
 
 Use this as the conflict-resolution checklist when merging `stable` into `airspace`:
 
-1. **Static-link toggles** in `cmake/dependencies/CMakeLists.txt`
-   (`8c706cc426`): `BUILD_SHARED_LIBS OFF` and `protobuf_BUILD_SHARED_LIBS OFF` in
-   the dependency-fetch block. High conflict likelihood; re-apply if upstream churns
-   this file.
+1. **Static-link toggles** in `cmake/dependencies/CMakeLists.txt`: the global
+   `BUILD_SHARED_LIBS OFF`, `protobuf_BUILD_SHARED_LIBS OFF`, per-dep `SHARED OFF`
+   cache params (SCIP, SoPlex), the post-Boost `BUILD_SHARED_LIBS` restore (upstream
+   sets it back to ON there), and BZip2's `ENABLE_SHARED_LIB OFF`/`ENABLE_STATIC_LIB ON`.
+   **Every new or reordered upstream dep must be audited for its own shared-lib
+   knob** — upstream builds deps shared by default and defeats the global toggle
+   in dep-specific ways. Verify with `otool -L`/`ldd` before any release.
 2. **Proto `go_package` options** pointing at
-   `github.com/airspacetechnologies/or-tools/...` in 7 `.proto` files under
+   `github.com/airspacetechnologies/or-tools/...` in 8 `.proto` files under
    `ortools/constraint_solver`, `ortools/sat`, `ortools/util`. Conflicts wherever
-   upstream edits those option lines.
+   upstream edits those option lines. **New upstream protos** imported by any proto
+   in `cmake/go.cmake`'s generation list need a `go_package` option AND a list
+   entry (v9.15 example: `routing_heuristic_parameters.proto`).
 3. **The entire Go binding subsystem** (airspace-only, upstream has no Go support):
    `cmake/go.cmake` (module path, install-path/rpath logic for Mac at
-   `/usr/local/lib`), `ortools/*/go/` SWIG interface files, and the generated-source
-   copy steps in `native.sh`.
+   `/usr/local/lib`, `GO_TEST_RACE` option), `ortools/*/go/` SWIG interface files,
+   and the generated-source copy steps in `native.sh`.
 4. **Go feature patches** on the SWIG layer: `AtSolutionCallback` support, VRP route
-   validation, `std::vector<int>` typemap fixes, CPDPTW Go example.
+   validation, `std::vector<int>` typemap fixes, `absl::Span<const T>` typemaps
+   (`SPAN_AS_GO_SLICE` in `ortools/util/go/vector.i` — upstream keeps migrating
+   APIs from `const std::vector<T>&` to spans; new element types are one-line
+   instantiations), CPDPTW Go example.
 5. `AIRSPACE-README.md`, `AGENTS.md`, `CLAUDE.md`, the `*airspace*` release scripts,
-   and `Version.txt` (ours; keep on merge).
+   `arm.sh`, and `Version.txt` (ours; keep on merge).
+
+**Silent-drop sweep (required after every merge):** git can drop airspace patches
+without flagging a conflict — rename detection swallowed `arm.sh`'s deletion, and
+upstream rewriting a patched line (SCIP's `SHARED`) auto-resolves to theirs. After
+merging, list files modified by BOTH sides since the merge base
+(`comm -12 <(git diff --name-only BASE OURS | sort) <(git diff --name-only BASE THEIRS | sort)`)
+and verify each airspace-added line still exists in the merged tree.
 
 After any merge: rebuild natively and run the Go tests before cutting a release;
-SWIG/CMake floor bumps upstream are the usual breakage source.
+SWIG/CMake floor bumps and vector→span API migrations upstream are the usual
+breakage sources.
 
 ## Release runbook
 
-> **STUB — being reworked in the v9.15 / Go 1.26 cycle** (move to manylinux_2_28
-> images, new `aarch64` Linux delivery, arch-parameterized build script). Until
-> finalized, the pre-rework steps are in `AIRSPACE-README.md` ("Build and Release").
-> Fill this section in with the as-built process, actual build times (incl. QEMU
-> aarch64 on x86 hosts), and the GitHub release/publish steps once that lands.
+As-built from the v9.15 / Go 1.26.5 cycle (2026-07). Human-oriented steps in
+`AIRSPACE-README.md`; this is the full sequence with the ordering rules.
+
+1. **Merge upstream** (see "Update Fork from Upstream" in `AIRSPACE-README.md` and
+   the checklist above): ff `stable` to `upstream/stable`, branch `airspace-vX.Y`
+   off `airspace`, merge `stable` into it, resolve + run the silent-drop sweep.
+2. **Iterate natively on the Mac first** (fast feedback): `./native.sh`, fix
+   compile/test breakage with targeted `cmake --build build/$(uname -m) --target <t>`
+   rebuilds, not full reruns. SWIG wrapper regen requires a `touch` of the
+   top-level `.i` (see gotchas).
+3. **Commit before building release artifacts**: the tarball patch number is the
+   commit count (`v9.0..HEAD`), so artifacts must be built after the final commit
+   or their names go stale. Precedent structure: one pure merge commit, one
+   "Updates for OR-Tools vX.Y" commit carrying all airspace changes.
+4. **Build the deliveries** (all named `v<X.Y>.<patch>` from the committed tree):
+   - Mac x86_64: `./native.sh` (or `--fast` to re-archive).
+   - Mac arm64: `./arm.sh` cross-compile; then `./universal.sh` to lipo.
+   - Linux amd64: `./tools/release/build_delivery_airspace.sh go amd64`.
+   - Linux aarch64: same with `arm64`. Build on an arm64 host where possible;
+     under QEMU on an x86_64 host expect roughly an order of magnitude slower
+     and read the QEMU gotchas below first.
+5. **Verify every tarball** (checklist below) before publishing.
+6. **PR the cycle branch into `airspace`**, merge, tag the merge commit
+   `v<X.Y>-go<GO_VERSION>`, and create the GitHub release with three assets:
+   x86_64 Linux, aarch64 Linux, universal macOS. Release name precedent:
+   "Go <GO_VERSION> Binaries for v<X.Y>".
+7. **Coordinate downstream** (module pins + consumer images; see "Who consumes
+   this repo"). Update these docs in the same cycle.
 
 ## Verification checklist (any release)
 
@@ -133,15 +174,54 @@ SWIG/CMake floor bumps upstream are the usual breakage source.
   (x86-64 / aarch64 / Mach-O universal). `lipo -info` for the Mac universal libs.
 - No external dependency libs required: inspect with `ldd` (Linux) /
   `otool -L` (Mac); only system libs + libortools should appear (static-link patch
-  intact).
+  intact). Pay particular attention to deps upstream added or reordered this
+  cycle — that is where the invariant breaks (v9.15: SCIP, SoPlex, BZip2).
+- Tarball sizes should be in the same ballpark as the previous release's assets;
+  a noticeably smaller tarball usually means deps went shared.
+- For Linux deliveries, re-run one Go example test inside the delivery image
+  against the shipped libs (the in-build tests can be lost to BuildKit log
+  clipping; this gives direct evidence).
 - Install locally per `AIRSPACE-README.md` and run the Go tests; then run
   downstream consumers' test suites against the new module pin + installed libs
-  (`go clean --modcache` first after swapping libs).
+  (`go clean --modcache` first after swapping libs). Do this BEFORE tagging the
+  release: consumer breakage found pre-tag is a branch fix, post-tag it's a
+  re-release.
 
 ## Gotchas
 
-- Intel Mac hosts: the Linux aarch64 delivery build runs under QEMU/binfmt (hours,
-  not ~45 min); prefer an arm64 host (M-series Mac, arm CI runner) when available.
+- x86_64 hosts: the Linux aarch64 delivery build runs under QEMU/binfmt, roughly
+  an order of magnitude slower than a native arm64 host (M-series Mac, arm CI
+  runner) — prefer the latter. For QEMU runs: **disable Docker Desktop's
+  Resource Saver** (it pauses the VM mid-build and can kill the buildx client
+  stream), prevent host sleep for the duration, and expect the whole run to be
+  lost on any failure — the build is a single Dockerfile `RUN`, so failed steps
+  commit nothing.
+- QEMU observability: BuildKit clips step logs at 2MiB and the client's log
+  stream lags or dies independently of the build. Ground truth is the VM's
+  process table: `docker run --rm --privileged --pid=host alpine ps` (emulated
+  binaries appear under their own names, e.g. `cc1plus`).
+- `go test -race` cannot run under qemu-user (TSan needs a 48-bit VMA; QEMU
+  provides 47). The delivery script auto-sets `GO_TEST_RACE=OFF` for cross-arch
+  builds; race coverage comes from the native platforms.
+- The manylinux images preinstall pipx-managed `cmake`/`swig` as `/usr/local/bin`
+  symlinks; installing over a symlink writes through into the pipx venv (cmake
+  then can't find `CMAKE_ROOT`). The airspace Dockerfiles `rm` the shims first
+  and assert resolved paths — keep that pattern when bumping tool versions.
+- CMake floor in practice is higher than `cmake_minimum_required` suggests:
+  3.25.0 fails on upstream's `FetchContent ... SYSTEM` keyword mid-configure
+  with a cryptic `can't open patch 'SYSTEM'` error. 3.31.2 is the known-good
+  version (matches the release images).
+- UseSWIG does not track `%include` dependencies (`SWIG_USE_SWIG_DEPENDENCIES`
+  is not enabled): editing `vector.i` or other included `.i` files does NOT
+  dirty the wrapper target. `touch` the top-level `.i` (e.g.
+  `ortools/constraint_solver/go/routing.i`) to force regeneration.
+- Toolchain lockstep: the Mac that regenerates the committed `go/` tree and the
+  release containers must agree on SWIG (4.3.1) and protoc-gen-go (v1.36.10)
+  versions, or wrapper symbols/generated code drift. A brew upgrade of swig on
+  the Mac requires re-aligning the Dockerfile pins (or vice versa).
+- SoPlex builds an unused `libsoplexshared` dylib unconditionally (its CMake
+  ignores the `SHARED` knob for that target); it's never linked or packed —
+  don't chase it during static-link verification.
 - `go clean --modcache` after changing installed or-tools libs; stale module cache
   causes confusing CGO link errors.
 - The delivery Dockerfile `COPY . /root/or-tools` builds your working tree, not a
