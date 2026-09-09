@@ -1,0 +1,279 @@
+# Airspace release pipeline: builds the Go delivery tarballs for all three
+# platforms and attaches them to a DRAFT GitHub release on the pushed tag.
+# A maintainer pushing a `v<X.Y>-go<GO_VERSION>` tag is the release approval;
+# publishing the draft is the final human checkpoint.
+#
+# workflow_dispatch runs build+verify only (no release) for dry runs. A tag
+# run first looks for a green dry run of the SAME commit and, if found,
+# promotes its artifacts instead of rebuilding (identical tree => identical
+# tarballs); otherwise it builds from scratch. Dry-run artifacts are kept 7
+# days, so tag within a week of the dry run to get the fast path.
+#
+# Toolchain pins come from tools/release/toolchain.env (shared with the
+# release Dockerfiles).
+name: airspace_release
+
+on:
+  push:
+    tags:
+      - 'v*-go*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: airspace-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: resolve
+    runs-on: ubuntu-latest
+    outputs:
+      reuse_run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - name: Find a green dry run for this commit
+        id: find
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          # Peel the tag to its commit (github.sha can be the tag object for
+          # annotated tags)
+          SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}" --jq .sha)
+          # Most recent successful dispatch run of this workflow on that commit;
+          # any failure here just means a full rebuild
+          RUN_ID=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/airspace_release.yml/runs?head_sha=${SHA}&status=success&per_page=10" \
+            --jq '[.workflow_runs[] | select(.event == "workflow_dispatch")][0].id // empty' || true)
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            cpu: x86_64
+            file_arch: 'x86-64'
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            cpu: aarch64
+            file_arch: 'ARM aarch64'
+    name: linux-${{ matrix.arch }}
+    needs: resolve
+    if: needs.resolve.outputs.reuse_run_id == ''
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # OR_TOOLS_PATCH = commit count; needs full history
+          fetch-tags: true
+      - name: Build delivery
+        run: ./tools/release/build_delivery_airspace.sh go ${{ matrix.arch }}
+      - name: Verify tarball
+        run: |
+          set -eux
+          TAR=$(ls export/or-tools_${{ matrix.cpu }}_*_go_v*.tar.gz)
+          mkdir -p /tmp/verify && tar xzf "$TAR" -C /tmp/verify
+          LIB=$(find /tmp/verify -name 'libgoortools.so')
+          file "$LIB" | grep -F '${{ matrix.file_arch }}'
+          # static-link invariant: nothing beyond system libs + libortools
+          docker run --rm ortools/manylinux_delivery_${{ matrix.arch }}:go \
+            "ldd build/${{ matrix.cpu }}/lib*/libgoortools.so" | tee /tmp/ldd.out
+          ! grep '=>' /tmp/ldd.out | grep -vE 'libortools|libc\.|libm\.|libdl\.|librt\.|libpthread\.|libstdc\+\+|libgcc_s|linux-vdso|ld-linux'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: export/or-tools_${{ matrix.cpu }}_*_go_v*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slice: arm64
+            build_cmd: ./native.sh
+          - slice: x86_64
+            build_cmd: ./cross.sh x86_64
+    name: macos-${{ matrix.slice }}
+    needs: resolve
+    if: needs.resolve.outputs.reuse_run_id == ''
+    # macos-latest is arm64 (required); pinned macOS labels get retired by
+    # GitHub eventually, and any toolchain breakage from a label bump surfaces
+    # in a dry run, not a release. Both slices build on arm64 runners: the
+    # x86_64 slice is a cross-compile (GitHub retired x86_64 macOS runners).
+    runs-on: macos-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Load toolchain pins
+        run: grep -Ev '^\s*(#|$)' tools/release/toolchain.env >> "$GITHUB_ENV"
+      - name: Install pinned CMake
+        run: |
+          set -eux
+          curl -sL -o cmake.tar.gz "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-macos-universal.tar.gz"
+          tar xzf cmake.tar.gz -C "$HOME"
+          echo "$HOME/cmake-${CMAKE_VERSION}-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
+      - name: Cache pinned SWIG
+        id: swig-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/swig
+          key: swig-${{ env.SWIG_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Build pinned SWIG
+        if: steps.swig-cache.outputs.cache-hit != 'true'
+        run: |
+          set -eux
+          brew install pcre2
+          curl -sL -o swig.tar.gz "https://downloads.sourceforge.net/project/swig/swig/swig-${SWIG_VERSION}/swig-${SWIG_VERSION}.tar.gz"
+          tar xzf swig.tar.gz
+          cd "swig-${SWIG_VERSION}"
+          ./configure --prefix="$HOME/swig"
+          make -j4 && make install
+      - name: Add SWIG to PATH
+        run: |
+          brew install pcre2 || true   # runtime dep when swig came from cache
+          echo "$HOME/swig/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install protoc-gen-go
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Toolchain preflight
+        run: |
+          set -eux
+          cmake --version | grep -F "${CMAKE_VERSION}"
+          swig -version | grep -F "${SWIG_VERSION}"
+          go version | grep -F "${GO_VERSION}"
+      # Dependency-source cache (upstream CI pattern): caches FetchContent
+      # checkouts + populate stamps, never dependency object code, so release
+      # artifacts are always compiled fresh. Only native.sh consumes it (the
+      # cross build manages its own tree); Linux jobs fetch inside Docker and
+      # can't use a runner-side cache (container-level caching is future work).
+      - name: Cache dependency sources
+        if: matrix.slice == 'arm64'
+        uses: actions/cache@v4
+        with:
+          path: |
+            .deps/*-src
+            .deps/*-subbuild
+          key: deps-src-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/dependencies/CMakeLists.txt', 'cmake/**', 'patches/**') }}
+      - name: Build ${{ matrix.slice }} slice
+        run: ${{ matrix.build_cmd }}
+        env:
+          FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.deps
+      # Slices are intermediates: kept as run artifacts (not release assets)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slice-macos-${{ matrix.slice }}
+          path: export/or-tools_${{ matrix.slice }}_macOS-*_go_v*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-universal:
+    name: macos-universal
+    needs: [resolve, macos-build]
+    if: needs.resolve.outputs.reuse_run_id == ''
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download slices
+        uses: actions/download-artifact@v4
+        with:
+          path: export
+          pattern: slice-macos-*
+          merge-multiple: true
+      - name: Lipo universal tarball
+        run: |
+          set -eux
+          ARM_TAR=$(ls export/or-tools_arm64_macOS-*_go_v*.tar.gz)
+          X86_TAR=$(ls export/or-tools_x86_64_macOS-*_go_v*.tar.gz)
+          sh universal.sh -a "$ARM_TAR" -x "$X86_TAR" -o "${ARM_TAR/arm64/universal}"
+      - name: Verify universal tarball
+        run: |
+          set -eux
+          TAR=$(ls export/or-tools_universal_macOS-*_go_v*.tar.gz)
+          mkdir -p /tmp/verify && tar xzf "$TAR" -C /tmp/verify
+          LIB=$(find /tmp/verify -name 'libgoortools.dylib')
+          lipo -info "$LIB" | grep 'x86_64 arm64'
+          # static-link invariant: nothing beyond system libs + libortools
+          otool -L "$LIB" | tee /tmp/otool.out
+          ! tail -n +2 /tmp/otool.out | grep -vE 'libgoortools|libortools|/usr/lib/|/System/Library/'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-universal
+          path: export/or-tools_universal_macOS-*_go_v*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  draft-release:
+    name: draft-release
+    # Runs when builds succeed OR were skipped in favor of promotion; never
+    # after a failure or cancellation
+    if: github.ref_type == 'tag' && !failure() && !cancelled()
+    needs: [resolve, linux, macos-universal]
+    runs-on: ubuntu-latest
+    steps:
+      # Full history + tags: release notes list commits since the previous release
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Download artifacts (built by this run)
+        if: needs.resolve.outputs.reuse_run_id == ''
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: release-*
+          merge-multiple: true
+      - name: Download artifacts (promoted from the dry run)
+        if: needs.resolve.outputs.reuse_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: release-*
+          merge-multiple: true
+          run-id: ${{ needs.resolve.outputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSED_RUN_ID: ${{ needs.resolve.outputs.reuse_run_id }}
+        run: |
+          set -eux
+          TAG="${GITHUB_REF_NAME}"
+          ORTOOLS_VERSION="${TAG%-go*}"
+          GO_VERSION="${TAG#*-go}"
+          # Skeleton notes in the established release format: title line plus
+          # one bullet per mainline commit since the previous published release
+          PREV_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty' || true)
+          {
+            echo "Updates for OR-Tools \`${ORTOOLS_VERSION}\`"
+            echo ""
+            if [ -n "${PREV_TAG}" ]; then
+              git log --first-parent --format='* %s' "${PREV_TAG}..HEAD"
+            fi
+            echo ""
+            echo "---"
+            echo "_Draft created by the airspace_release workflow; edit the notes above, then publish._"
+            if [ -n "${REUSED_RUN_ID}" ]; then
+              echo "_Assets promoted from same-commit dry run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${REUSED_RUN_ID}._"
+            fi
+          } > notes.md
+          gh release create "$TAG" assets/*.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "Go ${GO_VERSION} Binaries for ${ORTOOLS_VERSION}" \
+            --notes-file notes.md

@@ -35,6 +35,8 @@ Makefile.local
 docs
 tools/docker
 tools/release
+# Airspace: the release images COPY the toolchain pins
+!tools/release/toolchain.env
 tools/win
 Dependencies.txt
 README.md

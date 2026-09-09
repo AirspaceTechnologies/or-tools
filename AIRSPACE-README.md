@@ -36,23 +36,35 @@ It has Go bindings and binaries for use with Go projects.
      `xcode-select --install`
   1. Install C++ tools:
      `brew install wget pkg-config`
-  1. Install CMake `3.31.x` to match the release images:
-     download the installer from https://github.com/Kitware/CMake/releases/tag/v3.31.2
+  1. Install CMake matching `CMAKE_VERSION` in `tools/release/toolchain.env`:
+     download the installer from https://github.com/Kitware/CMake/releases
      or keep a parallel copy on `PATH` for or-tools builds
-  1. Install SWIG `4.3.1` (match version pinned in `tools/release/*_airspace.Dockerfile`):
+  1. Install SWIG matching `SWIG_VERSION` in `tools/release/toolchain.env`:
      `brew install swig`
-  1. Install Go matching the release toolchain (see the release tag, e.g. `1.26.5`)
-  1. Install protobuf for Go (match the Dockerfile pin):
-     `$ go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10`
+  1. Install Go matching `GO_VERSION` in `tools/release/toolchain.env`
+  1. Install protobuf for Go, matching `PROTOC_GEN_GO_VERSION` in `tools/release/toolchain.env`:
+     `$ go install google.golang.org/protobuf/cmd/protoc-gen-go@<version>`
   1. Clone Airspace OR-tools:
      `git clone git@github.com:AirspaceTechnologies/or-tools.git`
 </details>
 
 ### Build and Release
+ Releases are built by the `airspace_release` GitHub Actions workflow:
+  1. Dry run (formal pre-release step): Actions -> `airspace_release` ->
+     `Run workflow`. Builds and verifies all three tarballs; releases nothing
+  1. When green, tag that same commit and push the tag:
+     `git tag vX.Y-goZ <sha> && git push origin vX.Y-goZ`
+
+     The tag run promotes the dry-run artifacts into a draft release (same
+     commit, within 7 days), and rebuilds from scratch otherwise
+  1. Review the draft release, edit notes, publish
+
+ Manual/local steps:
   1. For native host machine (e.g. MacOS x86_64):
      `sh native.sh`
-  1. Cross-compile for Mac arm64 (e.g. Mac M1, M2):
-     `sh arm.sh`
+  1. Cross-compile for the other Mac architecture (x86_64 on an arm64 Mac,
+     and vice versa):
+     `sh cross.sh`
   1. Create universal Mac binaries:
      `sh universal.sh -a [arm64 tar ball] -x [x86_64 tar ball] -o [output tar ball]`
 
