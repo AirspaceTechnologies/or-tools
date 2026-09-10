@@ -23,6 +23,11 @@ TARGET=$(uname -m)
 PROJECT_DIR=$(pwd -P)
 BUILD_DIR=${PROJECT_DIR}/build/${TARGET}
 CMAKE_DEFAULT_ARGS=(-G ${CMAKE_GENERATOR:-"Unix Makefiles"} -DBUILD_DEPS=ON -DBUILD_CXX=ON -DBUILD_GO=ON -DBUILD_GO_EXAMPLES=ON -DGO_TEST_RACE=${GO_TEST_RACE:-ON})
+# Optionally keep FetchContent checkouts outside BUILD_DIR so they survive the
+# build-dir wipe (used by CI to cache dependency downloads between runs)
+if [[ -n "${FETCHCONTENT_BASE_DIR:-}" ]]; then
+  CMAKE_DEFAULT_ARGS+=(-DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_BASE_DIR}")
+fi
 
 # Only regenerate cmake config if not in fast mode or if build dir doesn't exist
 if [[ "$FAST_MODE" = false ]] || [[ ! -d "${BUILD_DIR}" ]]; then

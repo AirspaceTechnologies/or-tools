@@ -14,29 +14,34 @@
 
 set -xeuo pipefail
 
-#./tools/cross_compile.sh --help
+# Cross-compile the Mac Go delivery for a non-host architecture.
+# Usage: cross.sh [arm64|x86_64]
+# Defaults to whichever Mac architecture the host is not.
 
 export PROJECT=or-tools
-#export PROJECT=glop
-#export TARGET=x86_64
-#export TARGET=mips64
-#export TARGET=ppc64
-# export TARGET=aarch64
-export TARGET=arm64
 
-# for m1 mac
-# NOTE: aarch64 and arm64 are equivalent
+HOST=$(uname -m)
+TARGET_ARG="${1:-}"
+if [[ -z "${TARGET_ARG}" ]]; then
+  case "${HOST}" in
+    arm64) TARGET_ARG=x86_64 ;;
+    x86_64) TARGET_ARG=arm64 ;;
+    *) echo "Unsupported host '${HOST}'"; exit 1 ;;
+  esac
+fi
+export TARGET="${TARGET_ARG}"
+
 export GOOS=darwin
-export GOARCH=arm64
+case "${TARGET}" in
+  arm64) export GOARCH=arm64 ;;
+  x86_64) export GOARCH=amd64 ;;
+  *) echo "Unsupported TARGET '${TARGET}' (expected arm64 or x86_64)"; exit 1 ;;
+esac
 
-#./tools/cross_compile.sh toolchain
 ./tools/cross_compile.sh build
-# ./tools/cross_compile.sh qemu
-#./tools/cross_compile.sh test
 
 PROJECT_DIR=$(pwd -P)
 BUILD_DIR=${PROJECT_DIR}/build_cross/${TARGET}
-HOST=$(uname -m)
 
 # make archive
 INSTALL_GO_NAME=$(make print-INSTALL_GO_NAME 2> /dev/null | cut -d' ' -f3 | tr -d \' | sed 's/'${HOST}'/'${TARGET}'/g')

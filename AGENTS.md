@@ -86,14 +86,15 @@ which is what consumers import as a Go module.
 | Script | Purpose |
 |---|---|
 | `native.sh` | Native build + tarball for the host (`--fast` skips CMake regen). Arch-agnostic: everything keys off `uname -m`. Honors `GO_TEST_RACE` (default ON). |
-| `arm.sh` | Mac arm64 cross-compile from an x86_64 Mac host (wraps `tools/cross_compile.sh`). Compile-only verification: the qemu/test steps are commented out, so the arm64 Mac libs are first executed by consumers on Apple Silicon. |
+| `cross.sh` | Mac cross-compile for the non-host arch (defaults to whichever arch the host is not; wraps `tools/cross_compile.sh`). Compile-only: no tests run for the cross-built arch. Replaced the old `arm.sh` (upstream deleted theirs too). |
 | `universal.sh` | `lipo` two Mac tarballs (`-a` arm64, `-x` x86_64) into one universal tarball (`-o`). |
 | `tools/release/build_delivery_airspace.sh` | Linux delivery via Docker: `<script> go <amd64\|arm64>` selects `amd64_airspace.Dockerfile` or `aarch64_airspace.Dockerfile` (env → devel → delivery stages; delivery runs `native.sh` in-container) and copies tarballs to `export/`. Auto-disables `go test -race` when the target arch differs from the host (QEMU cannot run TSan). |
 
 Everything else under `tools/release/` (`build_delivery_linux.sh`,
 `*_manylinux_*.sh`, `amd64.Dockerfile`, `arm64.Dockerfile`, publish/test scripts,
 encrypted secrets) is **upstream's tooling, unused** by the airspace flow.
-The `*_airspace.Dockerfile`s pin CMake, SWIG, Go, and protoc-gen-go explicitly:
+The `*_airspace.Dockerfile`s pin CMake, SWIG, Go, and protoc-gen-go via
+`tools/release/toolchain.env` (single source, also loaded by the CI workflow):
 the manylinux `:latest` images silently drift their preinstalled toolchains, and
 the container SWIG must match the SWIG that regenerates the committed `go/` tree.
 
@@ -124,7 +125,9 @@ Use this as the conflict-resolution checklist when merging `stable` into `airspa
    APIs from `const std::vector<T>&` to spans; new element types are one-line
    instantiations), CPDPTW Go example.
 5. `AIRSPACE-README.md`, `AGENTS.md`, `CLAUDE.md`, the `*airspace*` release scripts,
-   `arm.sh`, and `Version.txt` (ours; keep on merge).
+   `cross.sh`, `tools/release/toolchain.env`, the `.dockerignore` re-inclusion of
+   `toolchain.env`, the Darwin `x86_64` case in `tools/cross_compile.sh` (upstream
+   only cross-compiles Macs toward arm64), and `Version.txt` (ours; keep on merge).
 
 **Silent-drop sweep (required after every merge):** git can drop airspace patches
 without flagging a conflict — rename detection swallowed `arm.sh`'s deletion, and
@@ -153,20 +156,34 @@ As-built from the v9.15 / Go 1.26.5 cycle (2026-07). Human-oriented steps in
    commit count (`v9.0..HEAD`), so artifacts must be built after the final commit
    or their names go stale. Precedent structure: one pure merge commit, one
    "Updates for OR-Tools vX.Y" commit carrying all airspace changes.
-4. **Build the deliveries** (all named `v<X.Y>.<patch>` from the committed tree):
-   - Mac x86_64: `./native.sh` (or `--fast` to re-archive).
-   - Mac arm64: `./arm.sh` cross-compile; then `./universal.sh` to lipo.
-   - Linux amd64: `./tools/release/build_delivery_airspace.sh go amd64`.
-   - Linux aarch64: same with `arm64`. Build on an arm64 host where possible;
-     under QEMU on an x86_64 host expect roughly an order of magnitude slower
-     and read the QEMU gotchas below first.
-5. **Verify every tarball** (checklist below) before publishing.
-6. **PR the cycle branch into `airspace`**, merge, tag the merge commit
-   `v<X.Y>-go<GO_VERSION>`, and create the GitHub release with three assets:
-   x86_64 Linux, aarch64 Linux, universal macOS. Release name precedent:
+4. **PR the cycle branch into `airspace`** and merge.
+5. **Dry run, then tag.** Run the `airspace_release` workflow
+   (`.github/workflows/airspace_release.yml`) via `workflow_dispatch` on the
+   merge commit: it builds all three deliveries on native runners and runs the
+   verification checklist, releasing nothing. When green, tag that same commit
+   `v<X.Y>-go<GO_VERSION>` and push the tag — the tag run promotes the dry
+   run's artifacts into a **draft** release (same commit within 7-day artifact
+   retention, else it rebuilds from scratch); review and publish it. Toolchain
+   pins live in `tools/release/toolchain.env` — the single source consumed by
+   the release Dockerfiles and the workflow.
+6. **Manual fallback** (also `workflow_dispatch` for dry runs): build locally
+   from the tagged commit — the tarball name embeds the commit count, so the
+   tree must match the tag:
+   - Mac: `./native.sh` for the host arch, `./cross.sh <other-arch>`, then
+     `./universal.sh` to lipo.
+   - Linux: `./tools/release/build_delivery_airspace.sh go <amd64|arm64>`.
+     Build on the matching host arch where possible; under QEMU expect roughly
+     an order of magnitude slower and read the QEMU gotchas below first.
+   Verify every tarball (checklist below), then create the release by hand:
+   three assets (x86_64 Linux, aarch64 Linux, universal macOS), name precedent
    "Go <GO_VERSION> Binaries for v<X.Y>".
 7. **Coordinate downstream** (module pins + consumer images; see "Who consumes
    this repo"). Update these docs in the same cycle.
+
+CI note: the 35 upstream workflows under `.github/workflows/` are disabled at
+the repo-settings level (`gh workflow disable`), not deleted — deleting them
+would conflict on every upstream merge. If Actions is ever re-enabled from
+scratch, re-run the disable sweep for everything except `airspace_release`.
 
 ## Verification checklist (any release)
 

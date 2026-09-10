@@ -210,6 +210,17 @@ function(add_go_example FILE_NAME)
     VERBATIM
   )
 
+  # All of a component's examples share one Go package dir and `go test`
+  # compiles every *_test.go present, so each test must wait for ALL of the
+  # component's sources to be copied; under parallel make, depending only on
+  # this example's copy races against the sibling copies
+  if(NOT TARGET go_${COMPONENT_NAME}_example_srcs)
+    add_custom_target(go_${COMPONENT_NAME}_example_srcs)
+  endif()
+  add_custom_target(go_copy_${COMPONENT_NAME}_${EXAMPLE_NAME}
+    DEPENDS ${GO_EXAMPLE_DIR}/${EXAMPLE_NAME}.go)
+  add_dependencies(go_${COMPONENT_NAME}_example_srcs go_copy_${COMPONENT_NAME}_${EXAMPLE_NAME})
+
   if(APPLE)
     set(CGO_ENVS CGO_LDFLAGS=-L${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
     set(LD_ENVS DYLD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
@@ -222,6 +233,7 @@ function(add_go_example FILE_NAME)
     COMMAND ${CGO_ENVS} ${GO_EXECUTABLE} test -exec "env ${LD_ENVS}" ./... -run /${EXAMPLE_NAME}/i $<$<BOOL:${GO_TEST_RACE}>:-race> -v
     DEPENDS
       ${GO_EXAMPLE_DIR}/${EXAMPLE_NAME}.go
+      go_${COMPONENT_NAME}_example_srcs
       go_package
     COMMENT "Compiling Go ${COMPONENT_NAME}/${EXAMPLE_NAME}.go (${GO_EXAMPLE_DIR}/${EXAMPLE_NAME}.run)"
     WORKING_DIRECTORY ${GO_EXAMPLE_DIR})
