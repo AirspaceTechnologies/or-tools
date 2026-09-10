@@ -109,6 +109,10 @@ function expand_clang_config() {
   # note: This is manadatory to use a file in order to have the CMake variable
   # 'CMAKE_CROSSCOMPILING' set to TRUE.
   # ref: https://cmake.org/cmake/help/latest/manual/cmake-toolchains.7.html#cross-compiling-for-linux
+  # NOTE: expand_* functions manage their own workspace; the downloading
+  # ones (bootlin/codescape) create this dir via unpack(), and the clang path
+  # must do so itself or it fails on pristine checkouts
+  mkdir -p "$(dirname "${TOOLCHAIN_FILE}")"
   cat >"$TOOLCHAIN_FILE" <<EOL
 set(CMAKE_SYSTEM_NAME Darwin)
 set(CMAKE_SYSTEM_PROCESSOR ${TARGET})
@@ -397,6 +401,11 @@ function main() {
   # ref: https://go.dev/doc/install/source#environment
   case ${TARGET} in
     x86_64)
+      # Airspace: on a Darwin host this is a Mac cross-compile (arm64 -> x86_64),
+      # symmetric with the arm64 case below
+      if [[ "$(uname -s)" == "Darwin" ]]; then
+        expand_clang_config
+      fi
       declare -r QEMU_ARCH=x86_64 ;;
     arm64)
       expand_clang_config

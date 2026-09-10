@@ -126,7 +126,8 @@ Use this as the conflict-resolution checklist when merging `stable` into `airspa
    instantiations), CPDPTW Go example.
 5. `AIRSPACE-README.md`, `AGENTS.md`, `CLAUDE.md`, the `*airspace*` release scripts,
    `cross.sh`, `tools/release/toolchain.env`, the `.dockerignore` re-inclusion of
-   `toolchain.env`, and `Version.txt` (ours; keep on merge).
+   `toolchain.env`, the Darwin `x86_64` case in `tools/cross_compile.sh` (upstream
+   only cross-compiles Macs toward arm64), and `Version.txt` (ours; keep on merge).
 
 **Silent-drop sweep (required after every merge):** git can drop airspace patches
 without flagging a conflict — rename detection swallowed `arm.sh`'s deletion, and
